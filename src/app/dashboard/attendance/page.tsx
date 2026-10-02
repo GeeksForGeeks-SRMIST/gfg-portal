@@ -179,7 +179,7 @@ export default function AttendancePage() {
           <div>
             <h2 className="text-xl font-extrabold text-gradient">Attendance Management</h2>
             <p className="text-xs font-semibold opacity-60">
-              {canTakeAttendance ? "Manage chapter accountability, record meetings, and view complete logs." : "Track your personal participation across meetings and event duties."}
+              Track your personal participation and view detailed date-wise session sheets across meetings.
             </p>
           </div>
         </div>
@@ -189,7 +189,7 @@ export default function AttendancePage() {
             onClick={() => setActiveTab("logs")}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "logs" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
           >
-            {canTakeAttendance ? "Global Session Records" : "My Attendance Record"}
+            Session Records
           </button>
           {canTakeAttendance && (
             <button
@@ -221,10 +221,10 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          {/* Session History & Detailed Breakdown */}
+          {/* Session History & Detailed Breakdown (Visible to all members) */}
           <div className="neo-flat rounded-[2rem] p-6 space-y-4">
             <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500 px-1">
-              {canTakeAttendance ? "Detailed Attendance Logs & Member Breakdown" : "Your Meeting History"}
+              Detailed Attendance Logs & Member Breakdown
             </h3>
 
             <div className="space-y-4">
@@ -265,44 +265,42 @@ export default function AttendancePage() {
                         </div>
                       </div>
 
-                      {/* Detailed Present & Absent Lists */}
-                      {canTakeAttendance && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
-                          {/* Present Column */}
-                          <div className="bg-emerald-500/5 border border-emerald-500/15 rounded-xl p-3 space-y-2">
-                            <p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-500 flex items-center gap-1.5">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Present ({presentList.length})
-                            </p>
-                            <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar pr-1">
-                              {presentList.map((rec: any) => (
-                                <div key={rec.id} className="flex items-center justify-between text-[11px] py-0.5 px-2 rounded hover:bg-emerald-500/10">
+                      {/* Detailed Present & Absent Lists (Now visible to everyone) */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+                        {/* Present Column */}
+                        <div className="bg-emerald-500/5 border border-emerald-500/15 rounded-xl p-3 space-y-2">
+                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-500 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Present ({presentList.length})
+                          </p>
+                          <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar pr-1">
+                            {presentList.map((rec: any) => (
+                              <div key={rec.id} className="flex items-center justify-between text-[11px] py-0.5 px-2 rounded hover:bg-emerald-500/10">
+                                <span className="font-semibold">{rec.profiles?.full_name}</span>
+                                <span className="text-[9px] opacity-50 uppercase">{rec.profiles?.reg_number}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Absent Column */}
+                        <div className="bg-rose-500/5 border border-rose-500/15 rounded-xl p-3 space-y-2">
+                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-rose-500 flex items-center gap-1.5">
+                            <XCircle className="w-3.5 h-3.5" /> Absent ({absentList.length})
+                          </p>
+                          <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar pr-1">
+                            {absentList.length === 0 ? (
+                              <p className="text-[11px] opacity-40 italic px-2">No absences recorded.</p>
+                            ) : (
+                              absentList.map((rec: any) => (
+                                <div key={rec.id} className="flex items-center justify-between text-[11px] py-0.5 px-2 rounded hover:bg-rose-500/10">
                                   <span className="font-semibold">{rec.profiles?.full_name}</span>
                                   <span className="text-[9px] opacity-50 uppercase">{rec.profiles?.reg_number}</span>
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Absent Column */}
-                          <div className="bg-rose-500/5 border border-rose-500/15 rounded-xl p-3 space-y-2">
-                            <p className="text-[10px] font-extrabold uppercase tracking-widest text-rose-500 flex items-center gap-1.5">
-                              <XCircle className="w-3.5 h-3.5" /> Absent ({absentList.length})
-                            </p>
-                            <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar pr-1">
-                              {absentList.length === 0 ? (
-                                <p className="text-[11px] opacity-40 italic px-2">No absences recorded.</p>
-                              ) : (
-                                absentList.map((rec: any) => (
-                                  <div key={rec.id} className="flex items-center justify-between text-[11px] py-0.5 px-2 rounded hover:bg-rose-500/10">
-                                    <span className="font-semibold">{rec.profiles?.full_name}</span>
-                                    <span className="text-[9px] opacity-50 uppercase">{rec.profiles?.reg_number}</span>
-                                  </div>
-                                ))
-                              )}
-                            </div>
+                              ))
+                            )}
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })

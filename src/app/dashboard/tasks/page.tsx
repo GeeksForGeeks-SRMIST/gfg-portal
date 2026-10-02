@@ -37,7 +37,7 @@ export default function TasksPage() {
   const [newAssigneeId, setNewAssigneeId] = useState("");
   const [isReassigning, setIsReassigning] = useState(false);
 
-  // Submission Form State (Member)
+  // Submission Form State (Member) - submissionLink optional
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [submissionLink, setSubmissionLink] = useState("");
   const [submissionNotes, setSubmissionNotes] = useState("");
@@ -111,6 +111,7 @@ export default function TasksPage() {
 
     const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(pData?.role);
 
+    // 1. Fetch Tasks
     let taskQuery = supabase.from("tasks").select("*, assigned_member:profiles!tasks_assigned_to_fkey(full_name, domain, role), assigner:profiles!tasks_assigned_by_fkey(full_name, role)").order("created_at", { ascending: false });
     if (!isLead) {
       taskQuery = taskQuery.eq("assigned_to", user.id);
@@ -118,12 +119,18 @@ export default function TasksPage() {
     const { data: tData } = await taskQuery;
     setTasks(tData || []);
 
-    const { data: subData } = await supabase
+    // 2. Fetch Submissions with explicit foreign key hint to prevent ambiguity
+    const { data: subData, error: subErr } = await supabase
       .from("task_submissions")
-      .select("*, task:tasks(*), member:profiles!task_submissions_member_id_fkey(full_name, domain, role)")
+      .select("*, task:tasks(*), member:profiles!task_submissions_member_id_fkey(id, full_name, domain, role)")
       .order("created_at", { ascending: false });
+    
+    if (subErr) {
+      console.error("Error fetching submissions:", subErr.message);
+    }
     setSubmissions(subData || []);
 
+    // 3. Fetch Ledger Points
     const { data: lData } = await supabase
       .from("points_ledger")
       .select("*")
@@ -131,6 +138,7 @@ export default function TasksPage() {
       .order("created_at", { ascending: false });
     setLedger(lData || []);
 
+    // 4. Fetch Approved Members for dropdowns
     const { data: mData } = await supabase.from("profiles").select("id, full_name, domain, role").eq("status", "approved");
     setMembers(mData || []);
 
@@ -276,16 +284,22 @@ export default function TasksPage() {
 
   async function handleSubmitTaskWork(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedTask || !submissionLink) return;
+    if (!selectedTask) return;
     setSubmittingWork(true);
 
-    await supabase.from("task_submissions").insert({
+    const { error } = await supabase.from("task_submissions").insert({
       task_id: selectedTask.id,
       member_id: profile.id,
-      submission_link: submissionLink,
+      submission_link: submissionLink.trim() || null,
       notes: submissionNotes,
       status: "pending_review"
     });
+
+    if (error) {
+      alert("Submission failed: " + error.message);
+      setSubmittingWork(false);
+      return;
+    }
 
     setSubmissionLink("");
     setSubmissionNotes("");
@@ -512,14 +526,18 @@ export default function TasksPage() {
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
-                      <a
-                        href={sub.submission_link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-2 neo-btn rounded-xl text-xs font-bold text-emerald-500 flex items-center gap-1 hover:scale-105 transition-all"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" /> View Deliverable
-                      </a>
+                      {sub.submission_link ? (
+                        <a
+                          href={sub.submission_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 neo-btn rounded-xl text-xs font-bold text-emerald-500 flex items-center gap-1 hover:scale-105 transition-all"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> View Deliverable
+                        </a>
+                      ) : (
+                        <span className="text-[10px] opacity-50 font-mono italic">No link attached</span>
+                      )}
 
                       {isLead && sub.status === 'pending_review' && (
                         canReview ? (
@@ -798,15 +816,15 @@ export default function TasksPage() {
             
             <input
               type="url"
-              required
-              placeholder="Submission Link (GitHub PR, Google Drive, Figma...)"
+              placeholder="Submission Link (Optional - GitHub, Drive, Figma...)"
               value={submissionLink}
               onChange={(e) => setSubmissionLink(e.target.value)}
               className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
 
             <textarea
-              placeholder="Notes for your lead..."
+              required
+              placeholder="Notes or description of completed work for your lead..."
               rows={3}
               value={submissionNotes}
               onChange={(e) => setSubmissionNotes(e.target.value)}
@@ -842,15 +860,26 @@ export default function TasksPage() {
             <p className="text-xs font-bold">{reviewingSubmission.task?.title}</p>
             <p className="text-[10px] opacity-60">Submitted by {reviewingSubmission.member?.full_name}</p>
 
-            <a
-              href={reviewingSubmission.submission_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block p-3 neo-pressed rounded-xl text-xs text-emerald-500 font-bold truncate flex items-center justify-between"
-            >
-              <span className="truncate">{reviewingSubmission.submission_link}</span>
-              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-            </a>
+            {reviewingSubmission.submission_link ? (
+              <a
+                href={reviewingSubmission.submission_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block p-3 neo-pressed rounded-xl text-xs text-emerald-500 font-bold truncate flex items-center justify-between"
+              >
+                <span className="truncate">{reviewingSubmission.submission_link}</span>
+                <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+              </a>
+            ) : (
+              <p className="text-[11px] opacity-50 italic p-2 neo-pressed rounded-xl">No external link attached. Review notes below.</p>
+            )}
+
+            {reviewingSubmission.notes && (
+              <div className="p-3 neo-pressed rounded-xl text-xs opacity-90 space-y-1">
+                <p className="text-[9px] font-black uppercase tracking-widest opacity-50">Submission Notes:</p>
+                <p className="italic">"{reviewingSubmission.notes}"</p>
+              </div>
+            )}
 
             <div className="flex gap-2 pt-2">
               <button

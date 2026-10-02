@@ -18,7 +18,8 @@ import {
   Users,
   CheckCircle2,
   Plus,
-  Loader2
+  Loader2,
+  Trash2
 } from "lucide-react";
 import Link from "next/link";
 
@@ -75,6 +76,7 @@ export default function DashboardOverview() {
       .on("postgres_changes", { event: "*", schema: "public", table: "task_submissions" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "confessions" }, () => fetchDashboardData())
+      .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => fetchDashboardData())
       .subscribe();
 
     return () => {
@@ -102,15 +104,14 @@ export default function DashboardOverview() {
       .from("notices")
       .select("*, author:profiles(full_name, role)")
       .order("created_at", { ascending: false })
-      .limit(2);
+      .limit(10);
     setNotices(noticesData || []);
 
     const { data: eventsData } = await supabase
       .from("events")
       .select("*")
       .gte("event_date", new Date().toISOString())
-      .order("event_date", { ascending: true })
-      .limit(3);
+      .order("event_date", { ascending: true });
     setUpcomingEvents(eventsData || []);
 
     const { data: profilesWithPoints } = await supabase
@@ -130,7 +131,7 @@ export default function DashboardOverview() {
       points: pointsMap[p.id] || 0
     })).sort((a, b) => b.points - a.points);
 
-    setTopLeaderboard(rankedList.slice(0, 5));
+    setTopLeaderboard(rankedList);
     setMyPoints(pointsMap[user.id] || 0);
 
     const { data: confessionData } = await supabase.from("confessions").select("*").eq("status", "approved").order("created_at", { ascending: false }).limit(1).single();
@@ -160,6 +161,21 @@ export default function DashboardOverview() {
     setIsCreatingEvent(false);
     setShowAddEventModal(false);
     fetchDashboardData();
+  }
+
+  async function handleDeleteEvent(eventId: string, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this event?")) return;
+    
+    // Optimistically remove from state immediately
+    setUpcomingEvents(prev => prev.filter(evt => evt.id !== eventId));
+
+    const { error } = await supabase.from("events").delete().eq("id", eventId);
+    if (error) {
+      alert("Error deleting event: " + error.message);
+      fetchDashboardData();
+    }
   }
 
   if (!profile) {
@@ -292,8 +308,8 @@ export default function DashboardOverview() {
             </Link>
           </div>
 
-          <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 flex-1 flex flex-col justify-between">
-            <div className="flex items-center justify-between px-1">
+          <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 h-[320px] flex flex-col justify-between">
+            <div className="flex items-center justify-between px-1 shrink-0">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                 <CheckSquare className="w-4 h-4" />
                 <h3 className="text-xs font-extrabold uppercase tracking-widest">My Active Tasks & Deliverables</h3>
@@ -303,9 +319,9 @@ export default function DashboardOverview() {
               </Link>
             </div>
 
-            <div className="space-y-2.5 flex-1 flex flex-col justify-center">
+            <div className="space-y-2.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
               {myTasks.length === 0 ? (
-                <div className="neo-pressed rounded-2xl p-6 text-center opacity-50 flex flex-col items-center justify-center">
+                <div className="neo-pressed rounded-2xl p-6 text-center opacity-50 flex flex-col items-center justify-center h-full">
                   <CheckCircle2 className="w-6 h-6 mb-2 text-emerald-500" />
                   <p className="text-xs font-bold">No pending tasks assigned right now.</p>
                 </div>
@@ -331,8 +347,8 @@ export default function DashboardOverview() {
         </div>
 
         <div className="lg:col-span-4 flex flex-col justify-between">
-          <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 h-full flex flex-col justify-between">
-            <div className="flex items-center justify-between px-1">
+          <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 h-[432px] flex flex-col justify-between">
+            <div className="flex items-center justify-between px-1 shrink-0">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                 <Trophy className="w-4 h-4" />
                 <h3 className="text-xs font-extrabold uppercase tracking-widest">Top Performers</h3>
@@ -342,7 +358,7 @@ export default function DashboardOverview() {
               </Link>
             </div>
 
-            <div className="space-y-2.5 flex-1 flex flex-col justify-around">
+            <div className="space-y-2.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
               {topLeaderboard.length === 0 ? (
                 <p className="text-xs opacity-50 text-center p-4">No rankings generated.</p>
               ) : (
@@ -374,10 +390,11 @@ export default function DashboardOverview() {
       </div>
 
       {/* Bottom Horizontal Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-stretch">
         
-        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 flex flex-col justify-between">
-          <div className="flex items-center justify-between px-1">
+        {/* Notice Board */}
+        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 h-[280px] flex flex-col justify-between">
+          <div className="flex items-center justify-between px-1 shrink-0">
             <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
               <Bell className="w-4 h-4" />
               <h3 className="text-xs font-extrabold uppercase tracking-widest">Notice Board</h3>
@@ -387,7 +404,7 @@ export default function DashboardOverview() {
             </Link>
           </div>
 
-          <div className="space-y-2.5 flex-1">
+          <div className="space-y-2.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
             {notices.length === 0 ? (
               <p className="text-xs opacity-50 p-4 text-center">No announcements.</p>
             ) : (
@@ -405,8 +422,9 @@ export default function DashboardOverview() {
           </div>
         </div>
 
-        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 flex flex-col justify-between relative">
-          <div className="flex items-center justify-between px-1">
+        {/* Upcoming Events */}
+        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 h-[280px] flex flex-col justify-between relative">
+          <div className="flex items-center justify-between px-1 shrink-0">
             <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
               <CalendarDays className="w-4 h-4" />
               <h3 className="text-xs font-extrabold uppercase tracking-widest">Upcoming Events</h3>
@@ -421,31 +439,43 @@ export default function DashboardOverview() {
             )}
           </div>
 
-          <div className="space-y-2.5 flex-1">
+          <div className="space-y-2.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
             {upcomingEvents.length === 0 ? (
               <div className="neo-pressed rounded-xl p-4 text-center opacity-50 flex items-center justify-center h-full">
                 <p className="text-xs font-bold">No upcoming events scheduled</p>
               </div>
             ) : (
               upcomingEvents.map((evt) => (
-                <div key={evt.id} className="neo-pressed rounded-xl p-3 space-y-1">
-                  <p className="text-xs font-bold">{evt.title}</p>
-                  <p className="text-[9px] font-semibold opacity-60 text-emerald-500">
-                    {new Date(evt.event_date).toLocaleDateString()} • {evt.location}
-                  </p>
+                <div key={evt.id} className="neo-pressed rounded-xl p-3 flex items-center justify-between gap-2">
+                  <div className="space-y-1 overflow-hidden">
+                    <p className="text-xs font-bold truncate">{evt.title}</p>
+                    <p className="text-[9px] font-semibold opacity-60 text-emerald-500 truncate">
+                      {new Date(evt.event_date).toLocaleDateString()} • {evt.location}
+                    </p>
+                  </div>
+                  {isLead && (
+                    <button
+                      onClick={(e) => handleDeleteEvent(evt.id, e)}
+                      className="p-2 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-colors shrink-0"
+                      title="Delete Event"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               ))
             )}
           </div>
         </div>
 
-        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 flex flex-col justify-between bg-gradient-to-br from-transparent to-emerald-500/5">
-          <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 px-1">
+        {/* Latest Confession */}
+        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 h-[280px] flex flex-col justify-between bg-gradient-to-br from-transparent to-emerald-500/5">
+          <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 px-1 shrink-0">
             <MessageSquareQuote className="w-4 h-4" />
             <h3 className="text-xs font-extrabold uppercase tracking-widest">Latest Confession</h3>
           </div>
 
-          <div className="flex-1 flex flex-col justify-center">
+          <div className="flex-1 flex flex-col justify-center overflow-y-auto custom-scrollbar pr-1">
             {latestConfession ? (
               <div className="neo-pressed rounded-2xl p-4 italic text-xs opacity-80 leading-relaxed border border-white/5">
                 "{latestConfession.message}"
@@ -457,7 +487,7 @@ export default function DashboardOverview() {
             )}
           </div>
 
-          <Link href="/dashboard/confessions" className="block text-center text-[10px] font-extrabold uppercase tracking-widest opacity-60 hover:text-emerald-500 transition-colors pt-1">
+          <Link href="/dashboard/confessions" className="block text-center text-[10px] font-extrabold uppercase tracking-widest opacity-60 hover:text-emerald-500 transition-colors pt-1 shrink-0">
             Submit Anonymous Post
           </Link>
         </div>

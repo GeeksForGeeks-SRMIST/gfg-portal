@@ -15,7 +15,7 @@ export function NotificationBell() {
 
   useEffect(() => {
     fetchNotifications();
-    registerServiceWorker();
+    initServiceWorker();
 
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -50,16 +50,16 @@ export function NotificationBell() {
     };
   }, []);
 
-  async function registerServiceWorker() {
-    if ("serviceWorker" in navigator && "PushManager" in window) {
-      try {
-        await navigator.serviceWorker.register("/sw.js");
-        if (Notification.permission === "granted") {
-          setPushEnabled(true);
-        }
-      } catch (err) {
-        console.error("Service worker registration failed:", err);
+  async function initServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+
+    try {
+      await navigator.serviceWorker.register("/sw.js");
+      if (Notification.permission === "granted") {
+        setPushEnabled(true);
       }
+    } catch (err) {
+      console.error("Service worker registration failed:", err);
     }
   }
 
@@ -72,20 +72,6 @@ export function NotificationBell() {
     const permission = await Notification.requestPermission();
     if (permission === "granted") {
       setPushEnabled(true);
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-      });
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from("push_subscriptions").insert({
-          user_id: user.id,
-          subscription: subscription,
-          user_agent: navigator.userAgent
-        });
-      }
-      alert("Mobile & Desktop OS Push Notifications Activated!");
     } else {
       alert("Notification permission was denied.");
     }
@@ -107,38 +93,22 @@ export function NotificationBell() {
   }
 
   async function deleteNotification(id: string) {
-    const { error } = await supabase
-      .from("notifications")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      console.error("Failed to delete notification from database:", error);
-      alert("Could not delete notification: " + error.message);
-      return;
+    const { error } = await supabase.from("notifications").delete().eq("id", id);
+    if (!error) {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      setUnreadCount(prev => Math.max(0, prev - 1));
     }
-
-    setNotifications(prev => prev.filter(n => n.id !== id));
-    setUnreadCount(prev => Math.max(0, prev - 1));
   }
 
   async function deleteAllNotifications() {
     const ids = notifications.map((n) => n.id);
     if (ids.length === 0) return;
 
-    const { error } = await supabase
-      .from("notifications")
-      .delete()
-      .in("id", ids);
-
-    if (error) {
-      console.error("Failed to clear notifications:", error);
-      alert("Could not clear notifications: " + error.message);
-      return;
+    const { error } = await supabase.from("notifications").delete().in("id", ids);
+    if (!error) {
+      setUnreadCount(0);
+      setNotifications([]);
     }
-
-    setUnreadCount(0);
-    setNotifications([]);
   }
 
   return (
@@ -166,17 +136,13 @@ export function NotificationBell() {
             )}
           </div>
 
-          {!pushEnabled ? (
+          {!pushEnabled && (
             <button
               onClick={requestPushPermission}
               className="w-full py-2 px-3 neo-btn rounded-xl text-[10px] font-extrabold uppercase tracking-wider text-emerald-500 flex items-center justify-center gap-2 border border-emerald-500/30"
             >
-              <Smartphone className="w-3.5 h-3.5" /> Enable Mobile OS Push
+              <Smartphone className="w-3.5 h-3.5" /> Enable Desktop / Mobile Alerts
             </button>
-          ) : (
-            <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-500 flex items-center justify-center gap-1 py-1 bg-emerald-500/10 rounded-lg">
-              <CheckCircle2 className="w-3 h-3" /> Mobile Push Active
-            </div>
           )}
 
           <div className="max-h-72 overflow-y-auto custom-scrollbar space-y-2">
@@ -192,23 +158,17 @@ export function NotificationBell() {
                     <p className="font-bold leading-tight">{n.title}</p>
                     <button
                       onClick={() => deleteNotification(n.id)}
-                      title="Dismiss / Delete"
+                      title="Dismiss"
                       className="p-1 neo-btn rounded-lg text-rose-500 hover:scale-110 transition-transform shrink-0"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  
                   <p className="opacity-80 text-[10px] leading-relaxed">{n.message}</p>
-
                   <div className="flex items-center justify-between pt-1 text-[8px] opacity-50 font-mono">
-                    <span>{new Date(n.created_at).toLocaleDateString()} {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>{new Date(n.created_at).toLocaleDateString()}</span>
                     {n.link && (
-                      <Link
-                        href={n.link}
-                        onClick={() => deleteNotification(n.id)}
-                        className="text-emerald-500 font-bold hover:underline flex items-center gap-0.5"
-                      >
+                      <Link href={n.link} onClick={() => deleteNotification(n.id)} className="text-emerald-500 font-bold hover:underline flex items-center gap-0.5">
                         View <ExternalLink className="w-2.5 h-2.5" />
                       </Link>
                     )}
