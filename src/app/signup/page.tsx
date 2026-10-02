@@ -159,7 +159,9 @@ export default function SignupPage() {
       free_slots: slots,
     }));
 
-    await supabase.from("timetable_slots").insert(timetableInserts);
+    if (timetableInserts.length > 0) {
+      await supabase.from("timetable_slots").insert(timetableInserts);
+    }
 
     setLoading(false);
     setSubmitted(true);
@@ -175,7 +177,7 @@ export default function SignupPage() {
           <div>
             <h2 className="text-xl font-extrabold text-gradient">Application Received</h2>
             <p className="text-xs font-medium opacity-70 mt-2 leading-relaxed">
-              Your onboarding request is pending approval by the President or Secretary. You can sign in once approved.
+              Your onboarding request is pending approval by the President. You can sign in once approved.
             </p>
           </div>
           <Link href="/" className="inline-block w-full py-3 neo-btn-green text-xs uppercase tracking-widest font-extrabold rounded-xl">
@@ -230,7 +232,7 @@ export default function SignupPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-2.5 pt-1">
-              <SelectBlock label="Domain *" value={domain} onChange={setDomain} options={["Technical", "Events", "Creatives"]} />
+              <SelectBlock label="Domain *" value={domain} onChange={setDomain} options={["Technical", "Events", "Creatives", "Executive"]} />
               <SelectBlock label="Position *" value={position} onChange={setPosition} options={["President", "Secretary", "Joint Secretary", "Domain Director", "Associate Lead", "Member"]} />
               <SelectBlock label="Batch *" value={batch} onChange={setBatch} options={["1", "2"]} className="col-span-2" />
             </div>

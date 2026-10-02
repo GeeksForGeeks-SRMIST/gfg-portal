@@ -1,23 +1,50 @@
 "use client";
 
-import { useTheme } from "next-themes";
-import { Sun, Moon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Sun, Moon } from "lucide-react";
 
 export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return <div className="w-12 h-12"></div>;
+  useEffect(() => {
+    // Check initial theme from DOM or localStorage
+    const savedTheme = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    
+    const isDark = savedTheme === "dark" || (!savedTheme && prefersDark);
+    setIsDarkMode(isDark);
+
+    if (isDark) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const nextDark = !isDarkMode;
+    setIsDarkMode(nextDark);
+
+    if (nextDark) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+    }
+  };
 
   return (
     <button
-      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      className="p-3 rounded-full neo-btn flex items-center justify-center text-gfg-green"
-      aria-label="Toggle Theme"
+      onClick={toggleTheme}
+      className="p-2.5 neo-btn rounded-xl text-[var(--text-main)] hover:text-emerald-500 transition-colors flex items-center justify-center"
+      title="Toggle Light/Dark Theme"
     >
-      {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
+      {isDarkMode ? (
+        <Sun className="w-4 h-4 text-amber-400" />
+      ) : (
+        <Moon className="w-4 h-4 text-emerald-600" />
+      )}
     </button>
   );
 }

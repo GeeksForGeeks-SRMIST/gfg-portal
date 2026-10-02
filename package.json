@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "import:members": "node scripts/import-members.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -19,7 +20,8 @@
     "next-themes": "^0.4.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-hook-form": "^7.89.0"
+    "react-hook-form": "^7.89.0",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

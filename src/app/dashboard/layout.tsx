@@ -10,15 +10,18 @@ import {
   Trophy, 
   CheckSquare, 
   FileText, 
+  CalendarCheck,
   MessageSquareQuote, 
   AlertOctagon, 
-  Image as ImageIcon, 
   Clock, 
   LogOut,
-  UserCircle,
-  Shield
+  User,
+  Shield,
+  Bell,
+  Image as ImageIcon
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { NotificationBell } from "@/components/NotificationBell";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<any>(null);
@@ -35,7 +38,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       }
       const { data } = await supabase
         .from("profiles")
-        .select("full_name, role, domain, avatar_path")
+        .select("id, full_name, role, domain, avatar_path")
         .eq("id", user.id)
         .single();
       setProfile(data);
@@ -53,110 +56,151 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const role = profile.role || "member";
   const isExecutiveLead = ["president", "secretary", "joint_secretary"].includes(role);
+  const isDomainDirector = role === "domain_director";
+  const isLeadOrDirector = isExecutiveLead || isDomainDirector;
+
+  const formatDesignation = (rawRole: string, domain?: string) => {
+    const roleMap: Record<string, string> = {
+      president: "President",
+      secretary: "Secretary",
+      joint_secretary: "Joint Secretary",
+      domain_director: `${domain ? domain.charAt(0).toUpperCase() + domain.slice(1) : ""} Director`,
+      associate_lead: `${domain ? domain.charAt(0).toUpperCase() + domain.slice(1) : ""} Associate`,
+      member: `${domain ? domain.charAt(0).toUpperCase() + domain.slice(1) : "Core"} Member`
+    };
+    return roleMap[rawRole] || rawRole.replace("_", " ");
+  };
 
   return (
-    <div className="min-h-screen flex bg-[var(--bg-base)] text-[var(--text-main)] overflow-hidden">
-      {/* Sidebar - Compact Neumorphic Panel */}
-      <aside className="w-64 hidden md:flex flex-col justify-between p-5 m-3 mr-0 rounded-[2rem] neo-flat relative z-10">
-        <div className="space-y-6">
-          {/* Official Brand Identity */}
-          <div className="flex items-center gap-3 px-1">
+    <div className="h-screen w-screen flex bg-[var(--bg-base)] text-[var(--text-main)] overflow-hidden font-sans">
+      
+      {/* Sidebar Navigation - Scrollable without visible scrollbars */}
+      <aside className="w-64 hidden md:flex flex-col justify-between p-4 m-3 mr-0 rounded-[2rem] neo-flat relative z-30 shrink-0 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="space-y-5">
+          
+          {/* Brand Identity Header */}
+          <div className="flex items-center gap-3 px-1 pt-1">
             <div className="w-10 h-10 rounded-xl neo-pressed flex items-center justify-center p-2 shrink-0">
               <Image src="/gfg.png" alt="GFG Logo" width={28} height={28} className="object-contain drop-shadow-sm" />
             </div>
             <div className="overflow-hidden">
-              <h2 className="font-extrabold tracking-tight text-sm text-gradient leading-tight truncate">
+              <h2 className="font-extrabold tracking-tight text-xs text-gradient leading-tight truncate">
                 GeeksforGeeks
               </h2>
               <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest truncate">
-                SRMIST • {role.replace("_", " ")}
+                SRMIST • CORE TEAM
               </p>
             </div>
           </div>
 
-          {/* Navigation Items */}
-          <nav className="space-y-1.5">
+          {/* Navigation Links */}
+          <nav className="space-y-1.5 text-xs">
             <NavLink href="/dashboard" icon={<LayoutDashboard size={16} strokeWidth={2.5} />} label="Overview" currentPath={pathname} />
-            <NavLink href="/dashboard/profile" icon={<UserCircle size={16} strokeWidth={2.5} />} label="My Profile" currentPath={pathname} />
-            <NavLink href="/dashboard/leaderboard" icon={<Trophy size={16} strokeWidth={2.5} />} label="Leaderboard" currentPath={pathname} />
+            <NavLink href="/dashboard/notices" icon={<Bell size={16} strokeWidth={2.5} />} label="Notice Board" currentPath={pathname} />
             <NavLink href="/dashboard/tasks" icon={<CheckSquare size={16} strokeWidth={2.5} />} label="Tasks & Points" currentPath={pathname} />
-            <NavLink href="/dashboard/mom" icon={<FileText size={16} strokeWidth={2.5} />} label="Attendance & MoM" currentPath={pathname} />
-            <NavLink href="/dashboard/schedule" icon={<Clock size={16} strokeWidth={2.5} />} label="Free Slots" currentPath={pathname} />
+            <NavLink href="/dashboard/leaderboard" icon={<Trophy size={16} strokeWidth={2.5} />} label="Leaderboard" currentPath={pathname} />
             
-            <div className="pt-3 pb-1 px-3 text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
+            <div className="pt-2 pb-1 px-2 text-[8px] font-extrabold text-[var(--text-muted)] uppercase tracking-widest">
+              Operations
+            </div>
+            <NavLink href="/dashboard/available-members" icon={<Clock size={16} strokeWidth={2.5} />} label="Available Members" currentPath={pathname} />
+            <NavLink href="/dashboard/attendance" icon={<CalendarCheck size={16} strokeWidth={2.5} />} label="Attendance" currentPath={pathname} />
+            <NavLink href="/dashboard/mom" icon={<FileText size={16} strokeWidth={2.5} />} label="Minutes of Meeting" currentPath={pathname} />
+            
+            <div className="pt-2 pb-1 px-2 text-[8px] font-extrabold text-[var(--text-muted)] uppercase tracking-widest">
               Community & Governance
             </div>
-            
             <NavLink href="/dashboard/confessions" icon={<MessageSquareQuote size={16} strokeWidth={2.5} />} label="Confessions" currentPath={pathname} />
             <NavLink href="/dashboard/memories" icon={<ImageIcon size={16} strokeWidth={2.5} />} label="Memories" currentPath={pathname} />
             
-            {isExecutiveLead && (
-              <>
-                <NavLink href="/dashboard/complaints" icon={<AlertOctagon size={16} strokeWidth={2.5} />} label="Complaints" currentPath={pathname} />
-                <NavLink href="/dashboard/admin" icon={<Shield size={16} strokeWidth={2.5} />} label="Manage Team" currentPath={pathname} />
-              </>
+            {isLeadOrDirector && (
+              <NavLink href="/dashboard/complaints" icon={<AlertOctagon size={16} strokeWidth={2.5} />} label="Complaints" currentPath={pathname} />
             )}
+            {isExecutiveLead && (
+              <NavLink href="/dashboard/admin" icon={<Shield size={16} strokeWidth={2.5} />} label="Manage Team" currentPath={pathname} />
+            )}
+
+            <div className="pt-2 pb-1 px-2 text-[8px] font-extrabold text-[var(--text-muted)] uppercase tracking-widest">
+              Account
+            </div>
+            <NavLink href="/dashboard/profile" icon={<User size={16} strokeWidth={2.5} />} label="My Profile" currentPath={pathname} />
           </nav>
         </div>
 
-        {/* User Footer */}
-        <div className="pt-4 border-t border-[var(--text-muted)]/15 space-y-3">
-          <div className="flex items-center gap-3 px-1">
-            <div className="w-9 h-9 rounded-full neo-pressed overflow-hidden flex items-center justify-center p-0.5 shrink-0">
+        {/* User Identity Footer */}
+        <div className="pt-3 border-t border-[var(--text-muted)]/15 space-y-2 shrink-0">
+          <div className="flex items-center gap-2.5 px-1">
+            <div className="w-8 h-8 rounded-full neo-pressed overflow-hidden flex items-center justify-center shrink-0 border border-emerald-500/30">
               {profile.avatar_path ? (
-                <img src={profile.avatar_path} alt="Avatar" className="w-full h-full object-cover rounded-full" />
+                <img src={profile.avatar_path} alt={profile.full_name} className="w-full h-full object-cover" />
               ) : (
-                <UserCircle className="w-5 h-5 opacity-40" />
+                <User className="w-4 h-4 opacity-40" />
               )}
             </div>
-            <div className="overflow-hidden">
-              <p className="text-xs font-bold truncate">{profile.full_name}</p>
-              <p className="text-[9px] uppercase font-semibold text-[var(--text-muted)] truncate">{profile.domain || "Core"}</p>
+            <div className="overflow-hidden min-w-0 flex-1">
+              <p className="text-xs font-bold truncate leading-tight">{profile.full_name}</p>
+              <p className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 truncate">
+                {formatDesignation(profile.role, profile.domain)}
+              </p>
             </div>
           </div>
           
           <form action="/auth/signout" method="post">
             <button 
               type="submit" 
-              className="w-full py-2.5 px-3 rounded-xl neo-btn font-bold text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 text-rose-500 hover:bg-rose-500/10 transition-colors"
+              className="w-full py-2 px-2.5 rounded-xl neo-btn font-bold text-[9px] uppercase tracking-wider flex items-center justify-center gap-1.5 text-rose-500 hover:bg-rose-500/10 transition-colors"
             >
-              <LogOut size={14} strokeWidth={2.5} /> Sign Out
+              <LogOut size={12} strokeWidth={2.5} /> Sign Out
             </button>
           </form>
         </div>
       </aside>
 
-      {/* Main Content Viewport */}
-      <main className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto custom-scrollbar">
-        <header className="h-20 px-8 flex items-center justify-between shrink-0 sticky top-0 z-20 backdrop-blur-md bg-[var(--bg-base)]/80 border-b border-[var(--text-muted)]/10">
-          <h1 className="text-base md:text-lg font-extrabold tracking-tight uppercase text-[var(--text-main)] opacity-90">
-            GFG SRMIST PORTAL <span className="text-emerald-500 mx-2">|</span> CORE TEAM
-          </h1>
-          <ThemeToggle />
+      {/* Main Viewport */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        
+        {/* Sticky Header */}
+        <header className="h-16 px-8 flex items-center justify-between shrink-0 bg-[var(--bg-base)] border-b border-[var(--text-muted)]/10 z-20">
+          <div className="flex items-center gap-3">
+            <span className="text-base md:text-lg font-black tracking-widest text-[var(--text-main)] uppercase">
+              GFG SRMIST PORTAL
+            </span>
+            <span className="text-xs px-2.5 py-0.5 rounded-full neo-pressed text-emerald-600 dark:text-emerald-400 font-extrabold tracking-wider uppercase border border-emerald-500/20">
+              CORE TEAM
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <NotificationBell />
+            <ThemeToggle />
+          </div>
         </header>
 
-        <div className="p-6 md:p-8 max-w-7xl w-full mx-auto animate-in fade-in duration-300">
-          {children}
-        </div>
-      </main>
+        {/* Scrollable Main Content Pane */}
+        <main className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8">
+          <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
+            {children}
+          </div>
+        </main>
+      </div>
+
     </div>
   );
 }
 
 function NavLink({ href, icon, label, currentPath }: { href: string; icon: React.ReactNode; label: string; currentPath: string }) {
   const isActive = currentPath === href;
-  
   return (
     <Link
       href={href}
-      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
+      className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
         isActive 
           ? "neo-pressed text-emerald-600 dark:text-emerald-400" 
           : "neo-btn text-[var(--text-muted)] hover:text-emerald-500"
       }`}
     >
       {icon}
-      <span>{label}</span>
+      <span className="truncate">{label}</span>
     </Link>
   );
 }
