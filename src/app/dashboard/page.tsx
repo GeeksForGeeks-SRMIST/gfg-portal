@@ -1,3 +1,4 @@
+// src/app/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -41,11 +42,8 @@ export default function LoginPage() {
     }
 
     const { data: profile } = await supabase.from("profiles").select("must_change_password").single();
-    if (profile?.must_change_password) {
-      router.push("/change-password");
-    } else {
-      router.push("/dashboard");
-    }
+    if (profile?.must_change_password) router.push("/change-password");
+    else router.push("/dashboard");
   };
 
   return (
@@ -56,10 +54,10 @@ export default function LoginPage() {
 
       <div className="w-full max-w-md p-8 rounded-3xl neo-flat space-y-8">
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full neo-flat text-gfg-green mb-4">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full neo-flat text-[var(--gfg-green)] mb-4">
             <LogIn className="w-8 h-8" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gfg-green">GFG SRMIST</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-[var(--gfg-green)]">GFG SRMIST</h1>
           <p className="text-sm font-medium opacity-70">Internal Team Dashboard</p>
         </div>
 
@@ -70,7 +68,7 @@ export default function LoginPage() {
           </div>
         )}
         {message && (
-          <div className="flex items-center gap-2 p-3 text-sm text-gfg-green rounded-xl neo-pressed">
+          <div className="flex items-center gap-2 p-3 text-sm text-[var(--gfg-green)] rounded-xl neo-pressed">
             <span>{message}</span>
           </div>
         )}
@@ -85,7 +83,7 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-11 pr-4 py-3 rounded-xl neo-pressed focus:outline-none bg-transparent"
+                className="w-full pl-11 pr-4 py-3 rounded-xl neo-pressed focus:outline-none focus:ring-2 focus:ring-[var(--gfg-green)] bg-transparent"
                 placeholder="xx1234@srmist.edu.in"
               />
             </div>
@@ -101,7 +99,7 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 rounded-xl neo-pressed focus:outline-none bg-transparent"
+                  className="w-full pl-11 pr-4 py-3 rounded-xl neo-pressed focus:outline-none focus:ring-2 focus:ring-[var(--gfg-green)] bg-transparent"
                   placeholder="••••••••"
                 />
               </div>
@@ -114,7 +112,7 @@ export default function LoginPage() {
         </form>
 
         <div className="text-center">
-          <button onClick={() => setIsResetMode(!isResetMode)} className="text-xs font-bold opacity-70 hover:text-gfg-green transition-colors">
+          <button onClick={() => setIsResetMode(!isResetMode)} className="text-xs font-bold opacity-70 hover:text-[var(--gfg-green)] transition-colors">
             {isResetMode ? "Back to Login" : "Forgot Password?"}
           </button>
         </div>
