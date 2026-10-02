@@ -68,13 +68,13 @@ export default function DashboardOverview() {
 
     fetchDashboardData();
 
-    // Setup Realtime Subscription for Live Updates across Tasks, Ledger & Leaderboard
     const channel = supabase
       .channel("dashboard_realtime_overview")
       .on("postgres_changes", { event: "*", schema: "public", table: "points_ledger" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "task_submissions" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchDashboardData())
+      .on("postgres_changes", { event: "*", schema: "public", table: "confessions" }, () => fetchDashboardData())
       .subscribe();
 
     return () => {
@@ -87,11 +87,9 @@ export default function DashboardOverview() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 1. Fetch Profile
     const { data: profileData } = await supabase.from("profiles").select("*").eq("id", user.id).single();
     setProfile(profileData);
 
-    // 2. Fetch Active Assigned Tasks
     const { data: tasksData } = await supabase
       .from("tasks")
       .select("*")
@@ -100,7 +98,6 @@ export default function DashboardOverview() {
       .order("deadline", { ascending: true });
     setMyTasks(tasksData || []);
 
-    // 3. Notices
     const { data: noticesData } = await supabase
       .from("notices")
       .select("*, author:profiles(full_name, role)")
@@ -108,7 +105,6 @@ export default function DashboardOverview() {
       .limit(2);
     setNotices(noticesData || []);
 
-    // 4. Upcoming Events
     const { data: eventsData } = await supabase
       .from("events")
       .select("*")
@@ -117,7 +113,6 @@ export default function DashboardOverview() {
       .limit(3);
     setUpcomingEvents(eventsData || []);
 
-    // 5. Calculate User Points and Global Top Performers Realtime
     const { data: profilesWithPoints } = await supabase
       .from("profiles")
       .select("id, full_name, domain, role, avatar_path")
@@ -138,15 +133,13 @@ export default function DashboardOverview() {
     setTopLeaderboard(rankedList.slice(0, 5));
     setMyPoints(pointsMap[user.id] || 0);
 
-    // 6. Confession
-    const { data: confessionData } = await supabase.from("confessions").select("*").eq("is_approved", true).order("created_at", { ascending: false }).limit(1).single();
+    const { data: confessionData } = await supabase.from("confessions").select("*").eq("status", "approved").order("created_at", { ascending: false }).limit(1).single();
     setLatestConfession(confessionData);
 
-    // 7. Executive Metrics
     const { count: pendingCount } = await supabase.from("profiles").select("*", { count: "exact", head: true }).eq("status", "pending");
     setPendingUsersCount(pendingCount || 0);
 
-    const { count: compCount } = await supabase.from("complaints").select("*", { count: "exact", head: true }).eq("status", "unresolved");
+    const { count: compCount } = await supabase.from("complaints").select("*", { count: "exact", head: true }).eq("status", "Unsolved");
     setComplaintsCount(compCount || 0);
 
     const { count: approvedCount } = await supabase.from("profiles").select("*", { count: "exact", head: true }).eq("status", "approved");
@@ -189,41 +182,39 @@ export default function DashboardOverview() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6 pb-6">
       
-      {/* Time-Based Greeting Banner */}
-      <div className="neo-flat rounded-[2rem] p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative overflow-hidden">
+      {/* Greeting Banner */}
+      <div className="neo-flat rounded-[2rem] p-5 md:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative overflow-hidden">
         <div className="space-y-0.5 relative z-10">
           <p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-500">
             {greeting},
           </p>
-          <h2 className="text-xl md:text-2xl font-black tracking-tight">
+          <h2 className="text-lg md:text-2xl font-black tracking-tight">
             <span className="text-gradient">{profile.full_name}</span>
           </h2>
-          <p className="text-[11px] font-bold opacity-60 uppercase tracking-wider">
+          <p className="text-[10px] md:text-[11px] font-bold opacity-60 uppercase tracking-wider">
             {formatDesignation(profile.role, profile.domain)} • GFG SRMIST
           </p>
         </div>
 
-        {/* WhatsApp Group Link */}
         <div className="flex items-center gap-3 relative z-10 w-full md:w-auto justify-end">
           <a 
             href="https://chat.whatsapp.com/JuIQo4lWYsCJSqcBtXTV98" 
             target="_blank" 
             rel="noopener noreferrer"
-            className="px-4 py-2.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 border border-emerald-500/30"
+            className="w-full md:w-auto px-4 py-2.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2 border border-emerald-500/30"
           >
             <MessageCircle className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span>Open Community Chat</span>
+            <span>Community Chat</span>
             <ArrowUpRight className="w-3.5 h-3.5 opacity-50 shrink-0" />
           </a>
         </div>
       </div>
 
       {/* Top Square Metric Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         
-        {/* Live Date & Station Time */}
         <div className="neo-flat rounded-2xl p-3.5 flex flex-col justify-between h-24">
           <div className="flex items-center justify-between text-emerald-500">
             <Clock className="w-4 h-4" />
@@ -232,58 +223,52 @@ export default function DashboardOverview() {
             </span>
           </div>
           <div>
-            <p className="text-xl md:text-2xl font-mono font-extrabold text-emerald-500 leading-none">{currentTime || "18:02:29"}</p>
+            <p className="text-lg md:text-2xl font-mono font-extrabold text-emerald-500 leading-none">{currentTime || "18:02:29"}</p>
             <p className="text-[9px] font-bold opacity-50 uppercase tracking-wider mt-1">Station Time</p>
           </div>
         </div>
 
-        {/* Total Points (Realtime) */}
         <div className="neo-flat rounded-2xl p-3.5 flex flex-col justify-between h-24">
           <div className="flex items-center justify-between text-emerald-500">
             <Award className="w-4 h-4" />
             <span className="text-[8px] font-extrabold uppercase tracking-widest opacity-50">Ledger</span>
           </div>
           <div>
-            <p className="text-2xl md:text-3xl font-black text-gradient leading-none">{myPoints}</p>
+            <p className="text-xl md:text-3xl font-black text-gradient leading-none">{myPoints}</p>
             <p className="text-[9px] font-bold opacity-50 uppercase tracking-wider mt-1">Total Points</p>
           </div>
         </div>
 
-        {/* Active Tasks (Realtime) */}
         <div className="neo-flat rounded-2xl p-3.5 flex flex-col justify-between h-24">
           <div className="flex items-center justify-between text-amber-500">
             <CheckSquare className="w-4 h-4" />
             <span className="text-[8px] font-extrabold uppercase tracking-widest opacity-50">Pending</span>
           </div>
           <div>
-            <p className="text-2xl md:text-3xl font-black leading-none">{myTasks.length}</p>
+            <p className="text-xl md:text-3xl font-black leading-none">{myTasks.length}</p>
             <p className="text-[9px] font-bold opacity-50 uppercase tracking-wider mt-1">Active Tasks</p>
           </div>
         </div>
 
-        {/* Core Members Strength */}
         <div className="neo-flat rounded-2xl p-3.5 flex flex-col justify-between h-24">
           <div className="flex items-center justify-between text-emerald-500">
             <Users className="w-4 h-4" />
             <span className="text-[8px] font-extrabold uppercase tracking-widest opacity-50">Enrolled</span>
           </div>
           <div>
-            <p className="text-2xl md:text-3xl font-black leading-none">{totalApprovedMembers || 58}</p>
+            <p className="text-xl md:text-3xl font-black leading-none">{totalApprovedMembers || 58}</p>
             <p className="text-[9px] font-bold opacity-50 uppercase tracking-wider mt-1">Core Members</p>
           </div>
         </div>
 
       </div>
 
-      {/* Level-Matched Bento Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+      {/* Bento Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 items-stretch">
         
-        {/* Left Column (8 Cols) */}
         <div className="lg:col-span-8 flex flex-col justify-between space-y-4">
           
-          {/* Governance Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
             <Link href="/dashboard/complaints" className="neo-flat rounded-2xl p-3.5 flex flex-col justify-between h-24 hover:scale-[1.01] transition-transform border border-rose-500/20">
               <div className="flex items-center justify-between text-rose-500">
                 <AlertOctagon className="w-4 h-4" />
@@ -295,7 +280,7 @@ export default function DashboardOverview() {
               </div>
             </Link>
 
-            <Link href="/dashboard/admin" className="neo-flat rounded-2xl p-4 flex flex-col justify-between h-24 hover:scale-[1.01] transition-transform border border-amber-500/30">
+            <Link href="/dashboard/admin" className="neo-flat rounded-2xl p-3.5 flex flex-col justify-between h-24 hover:scale-[1.01] transition-transform border border-amber-500/30">
               <div className="flex items-center justify-between text-amber-500">
                 <ShieldAlert className="w-4 h-4 animate-pulse" />
                 <span className="text-[8px] font-extrabold uppercase tracking-widest opacity-60">Admin</span>
@@ -305,11 +290,9 @@ export default function DashboardOverview() {
                 <p className="text-[9px] font-bold opacity-60 uppercase tracking-wider mt-1">Pending Signups</p>
               </div>
             </Link>
-
           </div>
 
-          {/* Active Tasks Panel */}
-          <div className="neo-flat rounded-[2rem] p-6 space-y-4 flex-1 flex flex-col justify-between">
+          <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 flex-1 flex flex-col justify-between">
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                 <CheckSquare className="w-4 h-4" />
@@ -320,7 +303,7 @@ export default function DashboardOverview() {
               </Link>
             </div>
 
-            <div className="space-y-2 flex-1 flex flex-col justify-center">
+            <div className="space-y-2.5 flex-1 flex flex-col justify-center">
               {myTasks.length === 0 ? (
                 <div className="neo-pressed rounded-2xl p-6 text-center opacity-50 flex flex-col items-center justify-center">
                   <CheckCircle2 className="w-6 h-6 mb-2 text-emerald-500" />
@@ -328,7 +311,7 @@ export default function DashboardOverview() {
                 </div>
               ) : (
                 myTasks.map((task) => (
-                  <div key={task.id} className="neo-pressed rounded-2xl p-3.5 flex items-center justify-between gap-4 border border-white/5">
+                  <div key={task.id} className="neo-pressed rounded-2xl p-3.5 flex items-center justify-between gap-3 border border-white/5">
                     <div className="space-y-0.5 overflow-hidden">
                       <h4 className="text-xs font-bold truncate">{task.title}</h4>
                       <p className="text-[10px] opacity-60 line-clamp-1">{task.description}</p>
@@ -347,9 +330,8 @@ export default function DashboardOverview() {
 
         </div>
 
-        {/* Right Column (4 Cols) - Top Performers Leaderboard Realtime */}
         <div className="lg:col-span-4 flex flex-col justify-between">
-          <div className="neo-flat rounded-[2rem] p-6 space-y-4 h-full flex flex-col justify-between">
+          <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 h-full flex flex-col justify-between">
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                 <Trophy className="w-4 h-4" />
@@ -392,10 +374,9 @@ export default function DashboardOverview() {
       </div>
 
       {/* Bottom Horizontal Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
         
-        {/* Notice Board */}
-        <div className="neo-flat rounded-[2rem] p-6 space-y-3 flex flex-col justify-between">
+        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 flex flex-col justify-between">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
               <Bell className="w-4 h-4" />
@@ -424,8 +405,7 @@ export default function DashboardOverview() {
           </div>
         </div>
 
-        {/* Upcoming Events */}
-        <div className="neo-flat rounded-[2rem] p-6 space-y-3 flex flex-col justify-between relative">
+        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 flex flex-col justify-between relative">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
               <CalendarDays className="w-4 h-4" />
@@ -434,7 +414,7 @@ export default function DashboardOverview() {
             {isLead && (
               <button
                 onClick={() => setShowAddEventModal(true)}
-                className="p-1 neo-btn rounded-md text-[9px] font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-1 hover:scale-105 transition-all"
+                className="p-1.5 neo-btn rounded-xl text-[9px] font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-1 hover:scale-105 transition-all"
               >
                 <Plus className="w-3 h-3" /> Event
               </button>
@@ -459,8 +439,7 @@ export default function DashboardOverview() {
           </div>
         </div>
 
-        {/* Latest Confession */}
-        <div className="neo-flat rounded-[2rem] p-6 space-y-3 flex flex-col justify-between bg-gradient-to-br from-transparent to-emerald-500/5">
+        <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-3 flex flex-col justify-between bg-gradient-to-br from-transparent to-emerald-500/5">
           <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 px-1">
             <MessageSquareQuote className="w-4 h-4" />
             <h3 className="text-xs font-extrabold uppercase tracking-widest">Latest Confession</h3>
@@ -469,7 +448,7 @@ export default function DashboardOverview() {
           <div className="flex-1 flex flex-col justify-center">
             {latestConfession ? (
               <div className="neo-pressed rounded-2xl p-4 italic text-xs opacity-80 leading-relaxed border border-white/5">
-                "{latestConfession.content}"
+                "{latestConfession.message}"
               </div>
             ) : (
               <div className="neo-pressed rounded-2xl p-4 text-center text-xs opacity-50">
@@ -485,10 +464,9 @@ export default function DashboardOverview() {
 
       </div>
 
-      {/* Add Event Admin Quick Modal */}
       {showAddEventModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleQuickAddEvent} className="w-full max-w-md neo-flat rounded-3xl p-6 space-y-4 animate-in zoom-in-95">
+          <form onSubmit={handleQuickAddEvent} className="w-full max-w-md neo-flat rounded-3xl p-6 space-y-4 animate-in zoom-in-95 bg-[var(--bg-base)]">
             <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500">Schedule Chapter Event</h3>
             
             <input

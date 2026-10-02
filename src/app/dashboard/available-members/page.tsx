@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Users, Search, Clock, UserCheck } from "lucide-react";
+import { Users, Clock, UserCheck, Check } from "lucide-react";
 
 const TIME_SLOTS = [
   "8:00 - 8:50", "8:50 - 9:40", "9:45 - 10:35", "10:40 - 11:30", "11:35 - 12:25", 
@@ -11,7 +11,7 @@ const TIME_SLOTS = [
 
 export default function AvailableMembersPage() {
   const [selectedDay, setSelectedDay] = useState<number>(1);
-  const [selectedSlot, setSelectedSlot] = useState<string>("8:00 - 8:50");
+  const [selectedSlots, setSelectedSlots] = useState<string[]>(["8:00 - 8:50"]);
   const [availableMembers, setAvailableMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -19,19 +19,38 @@ export default function AvailableMembersPage() {
 
   useEffect(() => {
     fetchFreeMembers();
-  }, [selectedDay, selectedSlot]);
+  }, [selectedDay, selectedSlots]);
+
+  const toggleSlotSelection = (slot: string) => {
+    setSelectedSlots((prev) =>
+      prev.includes(slot) ? prev.filter((s) => s !== slot) : [...prev, slot]
+    );
+  };
 
   async function fetchFreeMembers() {
+    if (selectedSlots.length === 0) {
+      setAvailableMembers([]);
+      return;
+    }
+
     setLoading(true);
-    // Query timetable slots matching selected day and slot
+    // Query timetable slots matching the selected day order
     const { data: slotRecords } = await supabase
       .from("timetable_slots")
       .select("profile_id, free_slots")
       .eq("day_order", selectedDay);
 
-    const matchingUserIds = slotRecords
-      ?.filter((r: any) => r.free_slots && r.free_slots.includes(selectedSlot))
-      .map((r: any) => r.profile_id) || [];
+    // Find members whose free_slots intersect with ANY of the selected slots
+    const matchedRecords = slotRecords?.filter((r: any) => 
+      r.free_slots && selectedSlots.some((slot) => r.free_slots.includes(slot))
+    ) || [];
+
+    const memberSlotsMap: Record<string, string[]> = {};
+    matchedRecords.forEach((r: any) => {
+      memberSlotsMap[r.profile_id] = r.free_slots || [];
+    });
+
+    const matchingUserIds = Object.keys(memberSlotsMap);
 
     if (matchingUserIds.length > 0) {
       const { data: profiles } = await supabase
@@ -39,7 +58,13 @@ export default function AvailableMembersPage() {
         .select("id, full_name, role, domain, avatar_path, reg_number")
         .in("id", matchingUserIds)
         .eq("status", "approved");
-      setAvailableMembers(profiles || []);
+
+      const enrichedProfiles = (profiles || []).map((p) => ({
+        ...p,
+        allFreeSlots: memberSlotsMap[p.id] || []
+      }));
+
+      setAvailableMembers(enrichedProfiles);
     } else {
       setAvailableMembers([]);
     }
@@ -54,12 +79,12 @@ export default function AvailableMembersPage() {
         </div>
         <div>
           <h2 className="text-xl font-extrabold text-gradient">Available Members Lookup</h2>
-          <p className="text-xs font-semibold opacity-60">Find free team members for quick meetings or event duties.</p>
+          <p className="text-xs font-semibold opacity-60">Find free team members across multiple slots for meetings or event duties.</p>
         </div>
       </div>
 
       {/* Filter Matrix */}
-      <div className="neo-flat rounded-[2rem] p-6 space-y-4">
+      <div className="neo-flat rounded-[2rem] p-6 space-y-5">
         <div>
           <label className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-500 block mb-2 px-1">Select Day Order</label>
           <div className="flex flex-wrap gap-2">
@@ -78,19 +103,35 @@ export default function AvailableMembersPage() {
         </div>
 
         <div>
-          <label className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-500 block mb-2 px-1">Select Time Block</label>
-          <div className="flex flex-wrap gap-2">
-            {TIME_SLOTS.map((slot) => (
-              <button
-                key={slot}
-                onClick={() => setSelectedSlot(slot)}
-                className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
-                  selectedSlot === slot ? "neo-pressed text-emerald-500" : "neo-btn opacity-60"
-                }`}
+          <div className="flex items-center justify-between mb-2 px-1">
+            <label className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-500">
+              Select Time Blocks (Multi-select)
+            </label>
+            {selectedSlots.length > 0 && (
+              <button 
+                onClick={() => setSelectedSlots([])}
+                className="text-[9px] font-bold opacity-60 hover:opacity-100 uppercase"
               >
-                {slot}
+                Clear Selection
               </button>
-            ))}
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {TIME_SLOTS.map((slot) => {
+              const isSelected = selectedSlots.includes(slot);
+              return (
+                <button
+                  key={slot}
+                  onClick={() => toggleSlotSelection(slot)}
+                  className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all flex items-center gap-1.5 ${
+                    isSelected ? "neo-pressed text-emerald-500 border border-emerald-500/30" : "neo-btn opacity-60"
+                  }`}
+                >
+                  {isSelected && <Check className="w-3 h-3" />}
+                  {slot}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -99,10 +140,10 @@ export default function AvailableMembersPage() {
       <div className="neo-flat rounded-[2rem] p-6 space-y-4">
         <div className="flex items-center justify-between px-1">
           <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500">
-            Free Members ({availableMembers.length})
+            Available Members ({availableMembers.length})
           </h3>
           <span className="text-[10px] font-bold opacity-50 uppercase tracking-widest">
-            Day Order {selectedDay} • {selectedSlot}
+            Day Order {selectedDay} • {selectedSlots.length} slot(s) selected
           </span>
         </div>
 
@@ -110,22 +151,43 @@ export default function AvailableMembersPage() {
           {loading ? (
             <p className="text-xs opacity-50 col-span-full py-8 text-center">Searching schedule database...</p>
           ) : availableMembers.length === 0 ? (
-            <p className="text-xs opacity-50 col-span-full py-8 text-center">No free members found for this specific slot.</p>
+            <p className="text-xs opacity-50 col-span-full py-8 text-center">No free members found for these selected slots.</p>
           ) : (
             availableMembers.map((member) => (
-              <div key={member.id} className="neo-pressed rounded-2xl p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl neo-flat overflow-hidden flex items-center justify-center shrink-0">
-                  {member.avatar_path ? (
-                    <img src={member.avatar_path} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <UserCheck className="w-5 h-5 opacity-40" />
-                  )}
+              <div key={member.id} className="neo-pressed rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl neo-flat overflow-hidden flex items-center justify-center shrink-0">
+                    {member.avatar_path ? (
+                      <img src={member.avatar_path} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <UserCheck className="w-5 h-5 opacity-40" />
+                    )}
+                  </div>
+                  <div className="overflow-hidden">
+                    <p className="text-xs font-extrabold truncate">{member.full_name}</p>
+                    <p className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest truncate">
+                      {member.domain || "Core"} • {member.role?.replace("_", " ")}
+                    </p>
+                  </div>
                 </div>
-                <div className="overflow-hidden">
-                  <p className="text-xs font-extrabold truncate">{member.full_name}</p>
-                  <p className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest truncate">
-                    {member.domain || "Core"} • {member.role.replace("_", " ")}
-                  </p>
+
+                {/* Free Slots Badges */}
+                <div className="space-y-1 pt-2 border-t border-[var(--text-muted)]/10">
+                  <p className="text-[8px] font-extrabold uppercase tracking-widest opacity-40">Free Time Slots:</p>
+                  <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto custom-scrollbar">
+                    {member.allFreeSlots.map((s: string, idx: number) => (
+                      <span 
+                        key={idx} 
+                        className={`text-[8px] font-mono px-2 py-0.5 rounded-md ${
+                          selectedSlots.includes(s) 
+                            ? "bg-emerald-500/20 text-emerald-500 font-extrabold border border-emerald-500/30" 
+                            : "neo-flat opacity-70"
+                        }`}
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))

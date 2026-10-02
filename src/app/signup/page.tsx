@@ -22,6 +22,7 @@ export default function SignupPage() {
   const [regNumber, setRegNumber] = useState("");
   const [srmEmail, setSrmEmail] = useState("");
   const [personalEmail, setPersonalEmail] = useState("");
+  const [aadhaarLast4, setAadhaarLast4] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [department, setDepartment] = useState("");
@@ -35,10 +36,11 @@ export default function SignupPage() {
   const [faEmail, setFaEmail] = useState("");
   const [faPhone, setFaPhone] = useState("");
 
-  // Social Links
+  // Social Links & Portfolio
   const [linkedinUrl, setLinkedinUrl] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
   const [instagramUrl, setInstagramUrl] = useState("");
+  const [portfolioUrl, setPortfolioUrl] = useState("");
 
   // Timetable State: Map of Day Order (1-5) -> Array of selected slots
   const [timetable, setTimetable] = useState<Record<number, string[]>>({
@@ -79,6 +81,13 @@ export default function SignupPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    // Enforce exactly 4 digits
+    if (!/^\d{4}$/.test(aadhaarLast4)) {
+      setError("Aadhaar verification requires exactly 4 digits.");
+      setLoading(false);
+      return;
+    }
 
     // 1. Sign up user via Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -128,8 +137,9 @@ export default function SignupPage() {
       role: position.toLowerCase().replace(" ", "_"),
       domain: domain.toLowerCase(),
       linkedin_url: linkedinUrl,
-      instagram_url: instagramUrl,
-      github_url: githubUrl,
+      instagram_url: instagramUrl || null,
+      github_url: githubUrl || null,
+      portfolio_url: portfolioUrl || null,
       tagline: tagline,
       avatar_path: avatarPath,
       status: "pending",
@@ -142,11 +152,12 @@ export default function SignupPage() {
       return;
     }
 
-    // 4. Insert Sensitive Private Profile Entry
+    // 4. Insert Sensitive Private Profile Entry (Saving BOTH Personal Email and Aadhaar Last 4)
     await supabase.from("profile_private").insert({
       profile_id: userId,
       phone: phone,
       personal_email: personalEmail,
+      aadhaar_last4: aadhaarLast4,
       fa_name: faName,
       fa_phone: faPhone,
       fa_email: faEmail,
@@ -223,12 +234,13 @@ export default function SignupPage() {
             <h3 className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-600 dark:text-emerald-400 px-1">1. Member Credentials</h3>
             <div className="grid grid-cols-2 gap-2.5">
               <InputBlock label="Full Name *" type="text" value={fullName} onChange={setFullName} placeholder="John Doe" className="col-span-2" />
-              <InputBlock label="Reg Number *" type="text" value={regNumber} onChange={setRegNumber} placeholder="RA2311003010xxx" />
+              <InputBlock label="Reg Number *" type="text" value={regNumber} onChange={setRegNumber} placeholder="RA2311003010xxx" className="col-span-2" />
               <InputBlock label="Department *" type="text" value={department} onChange={setDepartment} placeholder="CSE (Core)" />
-              <InputBlock label="SRM Mail ID *" type="email" value={srmEmail} onChange={setSrmEmail} placeholder="xx1234@srmist.edu.in" className="col-span-2" />
-              <InputBlock label="Password *" type="password" value={password} onChange={setPassword} placeholder="••••••••" className="col-span-2" />
-              <InputBlock label="Personal Email *" type="email" value={personalEmail} onChange={setPersonalEmail} placeholder="john@gmail.com" />
               <InputBlock label="Phone Number *" type="tel" value={phone} onChange={setPhone} placeholder="+91 9876543210" />
+              <InputBlock label="SRM Mail ID *" type="email" value={srmEmail} onChange={setSrmEmail} placeholder="xx1234@srmist.edu.in" className="col-span-2" />
+              <InputBlock label="Personal Email *" type="email" value={personalEmail} onChange={setPersonalEmail} placeholder="john@gmail.com" />
+              <InputBlock label="Aadhaar Last 4 *" type="text" value={aadhaarLast4} onChange={setAadhaarLast4} placeholder="XXXX" maxLength={4} pattern="\d{4}" title="Exactly 4 digits" />
+              <InputBlock label="Password *" type="password" value={password} onChange={setPassword} placeholder="••••••••" className="col-span-2" />
             </div>
 
             <div className="grid grid-cols-2 gap-2.5 pt-1">
@@ -277,8 +289,9 @@ export default function SignupPage() {
                 <InputBlock label="FA Email *" type="email" value={faEmail} onChange={setFaEmail} placeholder="fa@srmist.edu.in" />
                 <InputBlock label="FA Phone *" type="tel" value={faPhone} onChange={setFaPhone} placeholder="+91..." />
                 <InputBlock label="LinkedIn Profile *" type="url" value={linkedinUrl} onChange={setLinkedinUrl} placeholder="https://linkedin.com/in/..." className="col-span-2 pt-1" />
-                <InputBlock label="GitHub Profile" type="url" value={githubUrl} onChange={setGithubUrl} placeholder="https://github.com/..." required={false} />
-                <InputBlock label="Instagram Profile *" type="url" value={instagramUrl} onChange={setInstagramUrl} placeholder="https://instagram.com/..." />
+                <InputBlock label="GitHub Profile (Optional)" type="url" value={githubUrl} onChange={setGithubUrl} placeholder="https://github.com/..." required={false} />
+                <InputBlock label="Instagram Profile (Optional)" type="url" value={instagramUrl} onChange={setInstagramUrl} placeholder="https://instagram.com/..." required={false} className="col-span-2" />
+                <InputBlock label="Portfolio Link (Optional)" type="url" value={portfolioUrl} onChange={setPortfolioUrl} placeholder="https://yourportfolio.com" required={false} className="col-span-2" />
               </div>
             </div>
           </div>
@@ -289,7 +302,7 @@ export default function SignupPage() {
               <h3 className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-600 dark:text-emerald-400 px-1">3. Timetable Free Slots</h3>
               <p className="text-[10px] opacity-60 mt-0.5 px-1">Select all slots where you have no classes.</p>
               
-              <div className="mt-3 overflow-y-auto max-h-[380px] custom-scrollbar pr-1 space-y-2.5">
+              <div className="mt-3 overflow-y-auto max-h-[420px] custom-scrollbar pr-1 space-y-2.5">
                 {[1, 2, 3, 4, 5].map((dayOrder) => (
                   <div key={dayOrder} className="neo-pressed rounded-xl p-2.5 border border-white/5">
                     <span className="text-[9px] font-black uppercase tracking-widest text-emerald-500 block mb-1.5">Day Order {dayOrder}</span>
@@ -332,7 +345,7 @@ export default function SignupPage() {
   );
 }
 
-function InputBlock({ label, type, value, onChange, placeholder, required = true, className = "" }: any) {
+function InputBlock({ label, type, value, onChange, placeholder, required = true, className = "", maxLength, pattern, title }: any) {
   return (
     <div className={`space-y-0.5 ${className}`}>
       <label className="text-[9px] font-bold uppercase tracking-widest opacity-60 px-1">{label}</label>
@@ -342,6 +355,9 @@ function InputBlock({ label, type, value, onChange, placeholder, required = true
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        maxLength={maxLength}
+        pattern={pattern}
+        title={title}
         className="w-full px-3 py-2 neo-pressed rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent transition-all font-medium placeholder:opacity-30"
       />
     </div>

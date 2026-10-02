@@ -1,21 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Bell, Check, Smartphone, CheckCircle2 } from "lucide-react";
+import { Bell, Smartphone, CheckCircle2, ExternalLink, Trash2, X } from "lucide-react";
+import Link from "next/link";
 
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
   useEffect(() => {
     fetchNotifications();
     registerServiceWorker();
 
-    // Subscribe to Realtime Postgres Changes
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+
     const channel = supabase
       .channel("realtime_notifications")
       .on(
@@ -26,7 +34,6 @@ export function NotificationBell() {
           setNotifications((prev) => [newNotif, ...prev]);
           setUnreadCount((c) => c + 1);
 
-          // Native Web Notification API
           if ("Notification" in window && Notification.permission === "granted") {
             new Notification(newNotif.title, {
               body: newNotif.message,
@@ -38,6 +45,7 @@ export function NotificationBell() {
       .subscribe();
 
     return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -45,7 +53,7 @@ export function NotificationBell() {
   async function registerServiceWorker() {
     if ("serviceWorker" in navigator && "PushManager" in window) {
       try {
-        const registration = await navigator.serviceWorker.register("/sw.js");
+        await navigator.serviceWorker.register("/sw.js");
         if (Notification.permission === "granted") {
           setPushEnabled(true);
         }
@@ -67,7 +75,6 @@ export function NotificationBell() {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        // Optional VAPID Key string if configuring external WebPush server
       });
 
       const { data: { user } } = await supabase.auth.getUser();
@@ -96,42 +103,69 @@ export function NotificationBell() {
       .limit(10);
 
     setNotifications(data || []);
-    setUnreadCount(data?.filter((n) => !n.is_read).length || 0);
+    setUnreadCount(data?.length || 0);
   }
 
-  async function markAllAsRead() {
+  async function deleteNotification(id: string) {
+    const { error } = await supabase
+      .from("notifications")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("Failed to delete notification from database:", error);
+      alert("Could not delete notification: " + error.message);
+      return;
+    }
+
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    setUnreadCount(prev => Math.max(0, prev - 1));
+  }
+
+  async function deleteAllNotifications() {
     const ids = notifications.map((n) => n.id);
     if (ids.length === 0) return;
 
-    await supabase.from("notifications").update({ is_read: true }).in("id", ids);
+    const { error } = await supabase
+      .from("notifications")
+      .delete()
+      .in("id", ids);
+
+    if (error) {
+      console.error("Failed to clear notifications:", error);
+      alert("Could not clear notifications: " + error.message);
+      return;
+    }
+
     setUnreadCount(0);
-    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    setNotifications([]);
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-2.5 neo-btn rounded-xl relative hover:text-emerald-500 transition-colors"
+        className="p-2.5 neo-btn rounded-xl relative hover:text-emerald-500 transition-colors flex items-center justify-center"
       >
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white font-black text-[9px] rounded-full flex items-center justify-center animate-pulse">
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-emerald-500 text-black font-black text-[10px] rounded-full flex items-center justify-center animate-pulse shadow">
             {unreadCount}
           </span>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-3 w-80 neo-flat rounded-2xl p-4 shadow-2xl z-50 space-y-3 animate-in fade-in zoom-in-95">
-          <div className="flex items-center justify-between pb-2 border-b border-[var(--text-muted)]/10">
+        <div className="absolute right-0 mt-3 w-80 md:w-96 neo-flat rounded-3xl p-4 shadow-2xl z-50 space-y-3 animate-in fade-in zoom-in-95 bg-[var(--bg-base)] border border-[var(--text-muted)]/15">
+          <div className="flex items-center justify-between pb-2 border-b border-[var(--text-muted)]/10 px-1">
             <h4 className="text-xs font-black uppercase tracking-widest text-emerald-500">Live Alerts</h4>
-            <button onClick={markAllAsRead} className="text-[9px] font-bold opacity-60 hover:opacity-100 flex items-center gap-1">
-              <Check className="w-3 h-3" /> Mark Read
-            </button>
+            {notifications.length > 0 && (
+              <button onClick={deleteAllNotifications} className="text-[9px] font-bold opacity-60 hover:opacity-100 flex items-center gap-1 text-rose-500">
+                <Trash2 className="w-3 h-3" /> Clear All
+              </button>
+            )}
           </div>
 
-          {/* Device Push Activation Banner */}
           {!pushEnabled ? (
             <button
               onClick={requestPushPermission}
@@ -145,15 +179,40 @@ export function NotificationBell() {
             </div>
           )}
 
-          <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-2">
+          <div className="max-h-72 overflow-y-auto custom-scrollbar space-y-2">
             {notifications.length === 0 ? (
-              <p className="text-xs opacity-50 text-center py-4">No recent notifications</p>
+              <p className="text-xs opacity-50 text-center py-6">No recent notifications</p>
             ) : (
               notifications.map((n) => (
-                <div key={n.id} className={`p-3 neo-pressed rounded-xl border-l-2 text-xs space-y-0.5 ${n.type === 'reminder' ? 'border-amber-500' : 'border-emerald-500'}`}>
-                  <p className="font-bold">{n.title}</p>
-                  <p className="opacity-70 text-[10px] leading-relaxed">{n.message}</p>
-                  <p className="text-[8px] opacity-40 uppercase tracking-widest pt-1">{new Date(n.created_at).toLocaleTimeString()}</p>
+                <div 
+                  key={n.id} 
+                  className={`p-3 neo-pressed rounded-2xl border-l-2 text-xs space-y-1 transition-all border-emerald-500 bg-emerald-500/5 ${n.type === 'reminder' ? 'border-amber-500' : ''}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-bold leading-tight">{n.title}</p>
+                    <button
+                      onClick={() => deleteNotification(n.id)}
+                      title="Dismiss / Delete"
+                      className="p-1 neo-btn rounded-lg text-rose-500 hover:scale-110 transition-transform shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  
+                  <p className="opacity-80 text-[10px] leading-relaxed">{n.message}</p>
+
+                  <div className="flex items-center justify-between pt-1 text-[8px] opacity-50 font-mono">
+                    <span>{new Date(n.created_at).toLocaleDateString()} {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    {n.link && (
+                      <Link
+                        href={n.link}
+                        onClick={() => deleteNotification(n.id)}
+                        className="text-emerald-500 font-bold hover:underline flex items-center gap-0.5"
+                      >
+                        View <ExternalLink className="w-2.5 h-2.5" />
+                      </Link>
+                    )}
+                  </div>
                 </div>
               ))
             )}

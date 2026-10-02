@@ -56,13 +56,13 @@ export default function TasksPage() {
   const [taskDeadline, setTaskDeadline] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
 
-  // Executive Bonus Points State (President, Secretary, Jt. Secretary Only)
+  // Executive Bonus Points State
   const [bonusMemberId, setBonusMemberId] = useState("");
   const [bonusPoints, setBonusPoints] = useState(50);
   const [bonusReason, setBonusReason] = useState("");
   const [awardingBonus, setAwardingBonus] = useState(false);
 
-  // Presidential Penalty State (President Only)
+  // Presidential Penalty State
   const [penaltyMemberId, setPenaltyMemberId] = useState("");
   const [penaltyPoints, setPenaltyPoints] = useState(50);
   const [penaltyReason, setPenaltyReason] = useState("");
@@ -73,7 +73,6 @@ export default function TasksPage() {
   useEffect(() => {
     fetchPageData();
 
-    // Realtime subscription
     const channel = supabase
       .channel("tasks_realtime_full")
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => fetchPageData())
@@ -107,13 +106,11 @@ export default function TasksPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 1. Fetch User Profile
     const { data: pData } = await supabase.from("profiles").select("*").eq("id", user.id).single();
     setProfile(pData);
 
     const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(pData?.role);
 
-    // 2. Fetch Tasks with Assigned By profile join
     let taskQuery = supabase.from("tasks").select("*, assigned_member:profiles!tasks_assigned_to_fkey(full_name, domain, role), assigner:profiles!tasks_assigned_by_fkey(full_name, role)").order("created_at", { ascending: false });
     if (!isLead) {
       taskQuery = taskQuery.eq("assigned_to", user.id);
@@ -121,14 +118,12 @@ export default function TasksPage() {
     const { data: tData } = await taskQuery;
     setTasks(tData || []);
 
-    // 3. Fetch Submissions
     const { data: subData } = await supabase
       .from("task_submissions")
       .select("*, task:tasks(*), member:profiles!task_submissions_member_id_fkey(full_name, domain, role)")
       .order("created_at", { ascending: false });
     setSubmissions(subData || []);
 
-    // 4. Fetch User Ledger
     const { data: lData } = await supabase
       .from("points_ledger")
       .select("*")
@@ -136,14 +131,12 @@ export default function TasksPage() {
       .order("created_at", { ascending: false });
     setLedger(lData || []);
 
-    // 5. Fetch Active Members
     const { data: mData } = await supabase.from("profiles").select("id, full_name, domain, role").eq("status", "approved");
     setMembers(mData || []);
 
     setLoading(false);
   }
 
-  // Executive Action: Award Bonus Points
   async function handleAwardBonus(e: React.FormEvent) {
     e.preventDefault();
     if (!bonusMemberId || !bonusPoints || !bonusReason) return;
@@ -176,13 +169,11 @@ export default function TasksPage() {
     alert("Executive bonus points awarded successfully!");
   }
 
-  // Presidential Action: Issue Point Penalty (Deduction)
   async function handleIssuePenalty(e: React.FormEvent) {
     e.preventDefault();
     if (!penaltyMemberId || !penaltyPoints || !penaltyReason) return;
     setIssuingPenalty(true);
 
-    // Deduct points by inserting negative value into points_ledger
     const deductionVal = -Math.abs(parseInt(penaltyPoints.toString()));
 
     const { error } = await supabase.from("points_ledger").insert({
@@ -212,7 +203,6 @@ export default function TasksPage() {
     alert("Penalty applied and points deducted successfully.");
   }
 
-  // Lead Action: Create Task
   async function handleCreateTask(e: React.FormEvent) {
     e.preventDefault();
     if (!taskTitle || !taskAssignee || !taskDeadline) return;
@@ -307,7 +297,7 @@ export default function TasksPage() {
 
   async function handleReviewSubmission(submission: any, status: "approved" | "rejected") {
     if (!canReviewSubmission(profile.role, submission.member?.role)) {
-      alert(`Hierarchy Protection: As a ${profile.role.replace("_", " ")}, you cannot approve or grade deliverables submitted by a ${submission.member?.role?.replace("_", " ")}. This requires Executive Lead approval.`);
+      alert(`Hierarchy Protection: As a ${profile.role.replace("_", " ")}, you cannot approve deliverables submitted by a ${submission.member?.role?.replace("_", " ")}.`);
       return;
     }
 
@@ -351,13 +341,13 @@ export default function TasksPage() {
     <div className="space-y-6">
       
       {/* Header & Sub-Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-2">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
+          <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
             <CheckSquare className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-black text-gradient">Tasks & Points Ledger</h2>
+            <h2 className="text-xl font-extrabold text-gradient">Tasks & Points Ledger</h2>
             <p className="text-xs font-semibold opacity-60">Deliverable management, proof submissions, and earned contribution points.</p>
           </div>
         </div>
@@ -399,7 +389,7 @@ export default function TasksPage() {
               onClick={() => setActiveTab("bonus")}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "bonus" ? "neo-pressed text-amber-500" : "neo-btn text-amber-500"}`}
             >
-              <Sparkles className="w-3.5 h-3.5" /> Award Bonus Points
+              <Sparkles className="w-3.5 h-3.5" /> Award Bonus
             </button>
           )}
 
@@ -420,14 +410,14 @@ export default function TasksPage() {
           {loading ? (
             <div className="flex justify-center p-12"><Loader2 className="w-6 h-6 animate-spin opacity-50" /></div>
           ) : tasks.length === 0 ? (
-            <div className="neo-flat rounded-3xl p-12 text-center opacity-50 space-y-2">
+            <div className="neo-flat rounded-2xl p-12 text-center opacity-50 space-y-2">
               <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-500" />
               <p className="text-xs font-bold">No active tasks found.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {tasks.map((task) => (
-                <div key={task.id} className="neo-flat rounded-3xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden border border-white/5">
+                <div key={task.id} className="neo-flat rounded-2xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden border border-white/5">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className={`text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border ${
@@ -444,7 +434,7 @@ export default function TasksPage() {
                     <p className="text-xs opacity-70 leading-relaxed line-clamp-3">{task.description}</p>
                   </div>
 
-                  <div className="space-y-2.5 pt-2 border-t border-[var(--text-muted)]/10">
+                  <div className="space-y-2.5 pt-3 border-t border-[var(--text-muted)]/10">
                     <div className="flex items-center justify-between text-[10px] font-bold opacity-60">
                       <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-amber-500" /> Deadline:</span>
                       <span>{new Date(task.deadline).toLocaleDateString()}</span>
@@ -455,10 +445,9 @@ export default function TasksPage() {
                       <span className="text-emerald-500">{task.assigned_member?.full_name || "Unassigned"}</span>
                     </div>
 
-                    {/* Assigned By Metadata */}
                     <div className="flex items-center justify-between text-[10px] font-bold">
                       <span className="opacity-50">Assigned By:</span>
-                      <span className="text-amber-500">{task.assigner?.full_name || "Executive Board"} ({task.assigner?.role?.replace('_', ' ') || 'Lead'})</span>
+                      <span className="text-amber-500">{task.assigner?.full_name || "Executive Board"}</span>
                     </div>
 
                     {!isLead && task.status === 'pending' && (
@@ -471,16 +460,16 @@ export default function TasksPage() {
                     )}
 
                     {isLead && (
-                      <div className="flex items-center gap-2 pt-1">
+                      <div className="flex items-center gap-2 pt-2">
                         <button
                           onClick={() => { setReassignTask(task); setNewAssigneeId(task.assigned_to); }}
-                          className="w-1/2 py-2 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all"
+                          className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all"
                         >
                           <UserPlus className="w-3 h-3" /> Re-assign
                         </button>
                         <button
                           onClick={() => handleDeleteTask(task.id)}
-                          className="w-1/2 py-2 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-rose-500 flex items-center justify-center gap-1 hover:scale-105 transition-all"
+                          className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-rose-500 flex items-center justify-center gap-1 hover:scale-105 transition-all"
                         >
                           <Trash2 className="w-3 h-3" /> Delete
                         </button>
@@ -496,8 +485,8 @@ export default function TasksPage() {
 
       {/* TAB 2: Submissions Queue */}
       {activeTab === "submissions" && (
-        <div className="neo-flat rounded-3xl p-6 space-y-4">
-          <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Deliverables & Proof Logs</h3>
+        <div className="neo-flat rounded-2xl p-6 space-y-4">
+          <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500 px-1">Deliverables & Proof Logs</h3>
           
           <div className="space-y-3">
             {submissions.length === 0 ? (
@@ -518,7 +507,7 @@ export default function TasksPage() {
                         </span>
                       </div>
                       
-                      <p className="text-[10px] opacity-60">Submitted by <span className="text-emerald-500 font-bold">{sub.member?.full_name} ({sub.member?.role?.replace("_", " ")})</span></p>
+                      <p className="text-[10px] opacity-60">Submitted by <span className="text-emerald-500 font-bold">{sub.member?.full_name}</span></p>
                       {sub.notes && <p className="text-xs opacity-80 italic pt-1">"{sub.notes}"</p>}
                     </div>
 
@@ -536,7 +525,7 @@ export default function TasksPage() {
                         canReview ? (
                           <button
                             onClick={() => setReviewingSubmission(sub)}
-                            className="px-3 py-2 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-wider"
+                            className="px-4 py-2 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-wider"
                           >
                             Review Work
                           </button>
@@ -557,8 +546,8 @@ export default function TasksPage() {
 
       {/* TAB 3: Points History Ledger */}
       {activeTab === "ledger" && (
-        <div className="neo-flat rounded-3xl p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-[var(--text-muted)]/10 pb-4">
+        <div className="neo-flat rounded-2xl p-6 space-y-6">
+          <div className="flex items-center justify-between border-b border-[var(--text-muted)]/10 pb-4 px-1">
             <div>
               <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Points History Ledger</h3>
               <p className="text-[10px] opacity-60">Credits awarded for task completions, executive bonuses, and penalties.</p>
@@ -576,7 +565,7 @@ export default function TasksPage() {
               ledger.map((item) => {
                 const isNegative = item.points_awarded < 0;
                 return (
-                  <div key={item.id} className="neo-pressed rounded-xl p-3.5 flex items-center justify-between gap-4">
+                  <div key={item.id} className="neo-pressed rounded-2xl p-4 flex items-center justify-between gap-4">
                     <div className="space-y-0.5">
                       <p className="text-xs font-bold">{item.reason}</p>
                       <p className="text-[9px] opacity-40 uppercase tracking-widest">{new Date(item.created_at).toLocaleDateString()}</p>
@@ -594,7 +583,7 @@ export default function TasksPage() {
 
       {/* TAB 4: Assign Task Form */}
       {activeTab === "create" && isLead && (
-        <form onSubmit={handleCreateTask} className="neo-flat rounded-3xl p-6 max-w-xl space-y-4">
+        <form onSubmit={handleCreateTask} className="neo-flat rounded-2xl p-6 max-w-xl space-y-4">
           <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Assign Member Deliverable</h3>
           
           <input
@@ -652,7 +641,7 @@ export default function TasksPage() {
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium custom-scrollbar resize-none"
           />
 
-          <button type="submit" disabled={creatingTask} className="w-full py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+          <button type="submit" disabled={creatingTask} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
             {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckSquare className="w-4 h-4" /> Assign Task & Send Alert</>}
           </button>
         </form>
@@ -660,7 +649,7 @@ export default function TasksPage() {
 
       {/* TAB 5: Award Executive Bonus Points */}
       {activeTab === "bonus" && isExecutiveLead && (
-        <form onSubmit={handleAwardBonus} className="neo-flat rounded-3xl p-6 max-w-xl space-y-4">
+        <form onSubmit={handleAwardBonus} className="neo-flat rounded-2xl p-6 max-w-xl space-y-4">
           <div className="flex items-center gap-2 text-amber-500">
             <Sparkles className="w-4 h-4" />
             <h3 className="text-xs font-black uppercase tracking-widest">Award Executive Bonus Points</h3>
@@ -703,15 +692,15 @@ export default function TasksPage() {
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium custom-scrollbar resize-none"
           />
 
-          <button type="submit" disabled={awardingBonus} className="w-full py-3 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest text-amber-500 hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2 border border-amber-500/30">
+          <button type="submit" disabled={awardingBonus} className="w-full py-3.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest text-amber-500 hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2 border border-amber-500/30">
             {awardingBonus ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Sparkles className="w-4 h-4" /> Award Bonus Points & Notify Member</>}
           </button>
         </form>
       )}
 
-      {/* TAB 6: Presidential Penalty / Point Deduction (President Only) */}
+      {/* TAB 6: Presidential Penalty / Point Deduction */}
       {activeTab === "penalty" && isPresident && (
-        <form onSubmit={handleIssuePenalty} className="neo-flat rounded-3xl p-6 max-w-xl space-y-4">
+        <form onSubmit={handleIssuePenalty} className="neo-flat rounded-2xl p-6 max-w-xl space-y-4">
           <div className="flex items-center gap-2 text-rose-500">
             <TrendingDown className="w-4 h-4" />
             <h3 className="text-xs font-black uppercase tracking-widest">Presidential Point Penalty & Deduction</h3>
@@ -747,14 +736,14 @@ export default function TasksPage() {
 
           <textarea
             required
-            placeholder="Reason for point deduction (e.g. Unexcused absence from mandatory general body meeting)..."
+            placeholder="Reason for point deduction (e.g. Unexcused absence from mandatory meeting)..."
             rows={4}
             value={penaltyReason}
             onChange={(e) => setPenaltyReason(e.target.value)}
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-rose-500 font-medium custom-scrollbar resize-none"
           />
 
-          <button type="submit" disabled={issuingPenalty} className="w-full py-3 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-2 border border-rose-500/30">
+          <button type="submit" disabled={issuingPenalty} className="w-full py-3.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-2 border border-rose-500/30">
             {issuingPenalty ? <Loader2 className="w-4 h-4 animate-spin" /> : <><TrendingDown className="w-4 h-4" /> Issue Penalty & Deduct Points</>}
           </button>
         </form>
@@ -763,7 +752,7 @@ export default function TasksPage() {
       {/* Re-assign Task Modal */}
       {reassignTask && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleReassignTask} className="w-full max-w-md neo-flat rounded-3xl p-6 space-y-4 animate-in zoom-in-95">
+          <form onSubmit={handleReassignTask} className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95">
             <h3 className="text-xs font-black uppercase tracking-widest text-amber-500">Re-assign Deliverable</h3>
             <p className="text-xs font-bold">{reassignTask.title}</p>
 
@@ -785,16 +774,16 @@ export default function TasksPage() {
               <button
                 type="button"
                 onClick={() => setReassignTask(null)}
-                className="w-1/2 py-2.5 neo-btn rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isReassigning}
-                className="w-1/2 py-2.5 neo-btn rounded-xl text-xs font-bold text-amber-500 flex justify-center items-center gap-2"
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-amber-500 flex justify-center items-center gap-2 border border-amber-500/30"
               >
-                {isReassigning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm Re-assignment"}
+                {isReassigning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm"}
               </button>
             </div>
           </form>
@@ -804,7 +793,7 @@ export default function TasksPage() {
       {/* Member Work Submission Modal */}
       {selectedTask && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleSubmitTaskWork} className="w-full max-w-md neo-flat rounded-3xl p-6 space-y-4 animate-in zoom-in-95">
+          <form onSubmit={handleSubmitTaskWork} className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95">
             <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Submit Work: {selectedTask.title}</h3>
             
             <input
@@ -828,14 +817,14 @@ export default function TasksPage() {
               <button
                 type="button"
                 onClick={() => setSelectedTask(null)}
-                className="w-1/2 py-2.5 neo-btn rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={submittingWork}
-                className="w-1/2 py-2.5 neo-btn-green rounded-xl text-xs font-bold flex justify-center items-center gap-2"
+                className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold flex justify-center items-center gap-2"
               >
                 {submittingWork ? <Loader2 className="w-4 h-4 animate-spin" /> : "Submit Work"}
               </button>
@@ -847,11 +836,11 @@ export default function TasksPage() {
       {/* Lead Review & Grade Modal */}
       {reviewingSubmission && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md neo-flat rounded-3xl p-6 space-y-4 animate-in zoom-in-95">
+          <div className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95">
             <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Review Deliverable</h3>
             
             <p className="text-xs font-bold">{reviewingSubmission.task?.title}</p>
-            <p className="text-[10px] opacity-60">Submitted by {reviewingSubmission.member?.full_name} ({reviewingSubmission.member?.role})</p>
+            <p className="text-[10px] opacity-60">Submitted by {reviewingSubmission.member?.full_name}</p>
 
             <a
               href={reviewingSubmission.submission_link}
@@ -868,7 +857,7 @@ export default function TasksPage() {
                 type="button"
                 onClick={() => handleReviewSubmission(reviewingSubmission, "rejected")}
                 disabled={processingReview}
-                className="w-1/2 py-2.5 neo-btn text-rose-500 rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn text-rose-500 rounded-xl text-xs font-bold"
               >
                 Request Revision
               </button>
@@ -877,9 +866,9 @@ export default function TasksPage() {
                 type="button"
                 onClick={() => handleReviewSubmission(reviewingSubmission, "approved")}
                 disabled={processingReview}
-                className="w-1/2 py-2.5 neo-btn-green rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold"
               >
-                Approve & Award Points
+                Approve & Award
               </button>
             </div>
           </div>
