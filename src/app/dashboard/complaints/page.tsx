@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { AlertTriangle, Plus, CheckCircle2, Clock, XCircle, ShieldAlert, Loader2, Trash2, User, FileText, Lock } from "lucide-react";
+import { AlertTriangle, Plus, CheckCircle2, Loader2, Trash2, User, FileText } from "lucide-react";
 
 export default function ComplaintsPage() {
   const [profile, setProfile] = useState<any>(null);
@@ -16,6 +16,15 @@ export default function ComplaintsPage() {
   const [severity, setSeverity] = useState("Medium");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Custom Modal States (Replacing native alert/confirm)
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
+    isOpen: false, message: ""
+  });
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; complaintId: string | null; subject: string }>({
+    isOpen: false, complaintId: null, subject: ""
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const supabase = createClient();
 
@@ -31,7 +40,6 @@ export default function ComplaintsPage() {
     const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
     setProfile(userProfile);
 
-    // Fetch complaints with author join
     const { data: compData } = await supabase
       .from("complaints")
       .select("*, member:profiles!complaints_member_id_fkey(full_name, role, domain, srm_email)")
@@ -58,9 +66,9 @@ export default function ComplaintsPage() {
     });
 
     if (error) {
-      alert("Failed to submit grievance: " + error.message);
+      setAlertModal({ isOpen: true, message: "Failed to submit grievance: " + error.message });
     } else {
-      alert("Complaint logged successfully. Executive board has been notified.");
+      setAlertModal({ isOpen: true, message: "Complaint logged successfully. Executive board has been notified." });
       setSubject("");
       setDescription("");
       setActiveTab(isExecutiveAdmin ? "queue" : "submit");
@@ -76,17 +84,25 @@ export default function ComplaintsPage() {
       .eq("id", id);
 
     if (error) {
-      alert("Error updating status: " + error.message);
+      setAlertModal({ isOpen: true, message: "Error updating status: " + error.message });
     } else {
       fetchData();
     }
   }
 
-  async function handleDeleteComplaint(id: string) {
-    if (!confirm("Are you sure you want to delete this complaint record?")) return;
-    const { error } = await supabase.from("complaints").delete().eq("id", id);
-    if (error) alert("Error deleting: " + error.message);
-    else fetchData();
+  async function confirmAndDeleteComplaint() {
+    if (!deleteModal.complaintId) return;
+    setIsDeleting(true);
+
+    const { error } = await supabase.from("complaints").delete().eq("id", deleteModal.complaintId);
+    setIsDeleting(false);
+    setDeleteModal({ isOpen: false, complaintId: null, subject: "" });
+
+    if (error) {
+      setAlertModal({ isOpen: true, message: "Error deleting: " + error.message });
+    } else {
+      fetchData();
+    }
   }
 
   if (loading) {
@@ -114,21 +130,21 @@ export default function ComplaintsPage() {
           {isExecutiveAdmin && (
             <button
               onClick={() => setActiveTab("queue")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "queue" ? "neo-pressed text-rose-500" : "neo-btn opacity-70"}`}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "queue" ? "neo-pressed text-rose-500" : "neo-btn opacity-70"}`}
             >
               Admin Queue ({complaints.length})
             </button>
           )}
           <button
             onClick={() => setActiveTab("submit")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "submit" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "submit" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
           >
             <Plus className="w-3.5 h-3.5" /> Log Complaint
           </button>
         </div>
       </div>
 
-      {/* TAB 1: ADMIN QUEUE (President, Secretary, Jt. Secretary Only) */}
+      {/* TAB 1: ADMIN QUEUE */}
       {activeTab === "queue" && isExecutiveAdmin && (
         <div className="space-y-4">
           {complaints.length === 0 ? (
@@ -175,11 +191,10 @@ export default function ComplaintsPage() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {/* Status Change Dropdown */}
                         <select
                           value={comp.status}
                           onChange={(e) => handleUpdateStatus(comp.id, e.target.value)}
-                          className="px-3 py-1.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-bold"
+                          className="px-3 py-1.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-bold cursor-pointer"
                         >
                           <option value="Unsolved" className="bg-[var(--bg-surface)]">Unsolved</option>
                           <option value="In Progress" className="bg-[var(--bg-surface)]">In Progress</option>
@@ -188,8 +203,8 @@ export default function ComplaintsPage() {
                         </select>
 
                         <button
-                          onClick={() => handleDeleteComplaint(comp.id)}
-                          className="p-2 neo-btn rounded-xl text-rose-500 hover:scale-105 transition-all"
+                          onClick={() => setDeleteModal({ isOpen: true, complaintId: comp.id, subject: comp.subject })}
+                          className="p-2 neo-btn rounded-xl text-rose-500 hover:scale-105 transition-all cursor-pointer"
                           title="Delete Record"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -218,7 +233,7 @@ export default function ComplaintsPage() {
         </div>
       )}
 
-      {/* TAB 2: LOG COMPLAINT FORM (Visible to All Members) */}
+      {/* TAB 2: LOG COMPLAINT FORM */}
       {activeTab === "submit" && (
         <form onSubmit={handleCreateComplaint} className="neo-flat rounded-2xl p-6 max-w-xl mx-auto space-y-4">
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
@@ -245,7 +260,7 @@ export default function ComplaintsPage() {
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
+                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
               >
                 <option value="General Grievance" className="bg-[var(--bg-surface)]">General Grievance</option>
                 <option value="Task & Scheduling" className="bg-[var(--bg-surface)]">Task & Scheduling</option>
@@ -260,7 +275,7 @@ export default function ComplaintsPage() {
               <select
                 value={severity}
                 onChange={(e) => setSeverity(e.target.value)}
-                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
+                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
               >
                 <option value="Low" className="bg-[var(--bg-surface)]">Low</option>
                 <option value="Medium" className="bg-[var(--bg-surface)]">Medium</option>
@@ -282,10 +297,73 @@ export default function ComplaintsPage() {
             />
           </div>
 
-          <button type="submit" disabled={submitting} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+          <button type="submit" disabled={submitting} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer">
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Submit Grievance to Executives</>}
           </button>
         </form>
+      )}
+
+      {/* Custom Confirmation Dialog Modal for Deletion */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Confirm Deletion</h3>
+                <p className="text-[10px] opacity-60 font-semibold">Action is permanent</p>
+              </div>
+            </div>
+
+            <div className="neo-pressed rounded-2xl p-4 space-y-1">
+              <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Grievance Subject:</p>
+              <p className="text-xs font-bold truncate text-[var(--text-main)]">"{deleteModal.subject}"</p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ isOpen: false, complaintId: null, subject: "" })}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={confirmAndDeleteComplaint}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30 cursor-pointer"
+              >
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Record"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 text-emerald-500">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Notification</h3>
+            </div>
+
+            <p className="text-xs opacity-80 leading-relaxed px-1 text-[var(--text-main)]">{alertModal.message}</p>
+
+            <button
+              onClick={() => setAlertModal({ isOpen: false, message: "" })}
+              className="w-full py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer"
+            >
+              Okay
+            </button>
+          </div>
+        </div>
       )}
 
     </div>

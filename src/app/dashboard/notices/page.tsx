@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Bell, Plus, Loader2, AlertCircle, Trash2, Send, AlertTriangle } from "lucide-react";
+import { Bell, Plus, Loader2, Trash2, Send, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 export default function NoticesPage() {
   const [notices, setNotices] = useState<any[]>([]);
@@ -14,6 +14,19 @@ export default function NoticesPage() {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [isImportant, setIsImportant] = useState(false);
+
+  // Custom Modal States (Self-contained like dashboard overview)
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; noticeId: string | null; title: string }>({
+    isOpen: false,
+    noticeId: null,
+    title: ""
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
+    isOpen: false,
+    message: ""
+  });
 
   const supabase = createClient();
 
@@ -56,12 +69,12 @@ export default function NoticesPage() {
     setIsPublishing(true);
 
     // 1. Insert Notice
-    const { data: insertedNotice } = await supabase.from("notices").insert({
+    await supabase.from("notices").insert({
       title,
       content,
       is_important: isImportant,
       author_id: profile?.id
-    }).select().single();
+    });
 
     // 2. Send Real-Time Broadcast Notification
     await supabase.from("notifications").insert({
@@ -77,10 +90,20 @@ export default function NoticesPage() {
     fetchData();
   }
 
-  async function handleDeleteNotice(id: string) {
-    if (!confirm("Are you sure you want to delete this notice?")) return;
-    await supabase.from("notices").delete().eq("id", id);
-    fetchData();
+  async function confirmAndDeleteNotice() {
+    if (!deleteModal.noticeId) return;
+    setIsDeleting(true);
+
+    // Optimistically filter out from UI
+    setNotices(prev => prev.filter(n => n.id !== deleteModal.noticeId));
+
+    const { error } = await supabase.from("notices").delete().eq("id", deleteModal.noticeId);
+    if (error) {
+      fetchData();
+    }
+
+    setIsDeleting(false);
+    setDeleteModal({ isOpen: false, noticeId: null, title: "" });
   }
 
   async function handleSendReminder(notice: any) {
@@ -89,7 +112,10 @@ export default function NoticesPage() {
       message: `Important reminder regarding notice published on ${new Date(notice.created_at).toLocaleDateString()}`,
       type: "reminder"
     });
-    alert(`Real-time reminder sent to all members for: "${notice.title}"`);
+    setAlertModal({
+      isOpen: true,
+      message: `Real-time reminder sent to all members for: "${notice.title}"`
+    });
   }
 
   const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(profile?.role);
@@ -106,7 +132,7 @@ export default function NoticesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
         {/* Notices Feed */}
         <div className={`flex flex-col gap-4 ${isLead ? 'lg:col-span-8' : 'lg:col-span-12'}`}>
@@ -138,14 +164,14 @@ export default function NoticesPage() {
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleSendReminder(notice)}
-                        className="px-2.5 py-1 neo-btn rounded-lg text-[9px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1 hover:scale-105 transition-all"
+                        className="px-2.5 py-1.5 neo-btn rounded-xl text-[9px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1 hover:scale-105 transition-all cursor-pointer"
                         title="Send Real-time Alert Notification"
                       >
                         <Send className="w-3 h-3" /> Send Reminder
                       </button>
                       <button
-                        onClick={() => handleDeleteNotice(notice.id)}
-                        className="p-1.5 neo-btn rounded-lg text-rose-500 hover:scale-110 active:scale-95 transition-all"
+                        onClick={() => setDeleteModal({ isOpen: true, noticeId: notice.id, title: notice.title })}
+                        className="p-2 neo-btn rounded-xl text-rose-500 hover:scale-110 active:scale-95 transition-all cursor-pointer"
                         title="Delete Notice"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -190,7 +216,7 @@ export default function NoticesPage() {
                 <span className="text-[10px] font-bold uppercase tracking-widest opacity-70">Mark as High Priority</span>
               </label>
 
-              <button type="submit" disabled={isPublishing} className="w-full py-3 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex justify-center items-center gap-2">
+              <button type="submit" disabled={isPublishing} className="w-full py-3 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex justify-center items-center gap-2 cursor-pointer">
                 {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4" /> Publish & Notify All</>}
               </button>
             </form>
@@ -198,6 +224,70 @@ export default function NoticesPage() {
         )}
 
       </div>
+
+      {/* Custom Confirmation Dialog Modal for Deletion */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Confirm Deletion</h3>
+                <p className="text-[10px] opacity-60 font-semibold">Action is permanent</p>
+              </div>
+            </div>
+
+            <div className="neo-pressed rounded-2xl p-4 space-y-1">
+              <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Notice to Delete:</p>
+              <p className="text-xs font-bold truncate text-[var(--text-main)]">"{deleteModal.title}"</p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ isOpen: false, noticeId: null, title: "" })}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={confirmAndDeleteNotice}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30 cursor-pointer"
+              >
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Notice"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal for Reminder Feedback */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 text-emerald-500">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Reminder Dispatched</h3>
+            </div>
+
+            <p className="text-xs opacity-80 leading-relaxed px-1 text-[var(--text-main)]">{alertModal.message}</p>
+
+            <button
+              onClick={() => setAlertModal({ isOpen: false, message: "" })}
+              className="w-full py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer"
+            >
+              Okay
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

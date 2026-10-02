@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "@/app/globals.css";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
+import { GlobalAlert } from "@/components/GlobalAlert";
 
 export const metadata: Metadata = {
   title: "GFG SRMIST Portal | Core Team",
@@ -33,6 +34,7 @@ export default function RootLayout({
       <body className="antialiased bg-[var(--bg-base)] text-[var(--text-main)]">
         {children}
         <PwaInstallPrompt />
+        <GlobalAlert />
       </body>
     </html>
   );

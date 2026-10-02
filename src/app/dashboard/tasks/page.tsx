@@ -6,19 +6,16 @@ import {
   CheckSquare, 
   Plus, 
   Clock, 
-  Award, 
   Send, 
   CheckCircle2, 
-  XCircle, 
   ExternalLink, 
   Loader2, 
   Trash2, 
   UserPlus, 
-  ShieldAlert,
   Lock,
   Sparkles,
   TrendingDown,
-  User
+  AlertTriangle
 } from "lucide-react";
 
 export default function TasksPage() {
@@ -37,7 +34,7 @@ export default function TasksPage() {
   const [newAssigneeId, setNewAssigneeId] = useState("");
   const [isReassigning, setIsReassigning] = useState(false);
 
-  // Submission Form State (Member) - submissionLink optional
+  // Submission Form State (Member)
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [submissionLink, setSubmissionLink] = useState("");
   const [submissionNotes, setSubmissionNotes] = useState("");
@@ -45,28 +42,37 @@ export default function TasksPage() {
 
   // Review Form State (Lead)
   const [reviewingSubmission, setReviewingSubmission] = useState<any>(null);
-  const [reviewComment, setReviewComment] = useState("");
   const [processingReview, setProcessingReview] = useState(false);
 
   // New Task Creation State (Lead)
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDesc, setTaskDesc] = useState("");
   const [taskAssignee, setTaskAssignee] = useState("");
-  const [taskPoints, setTaskPoints] = useState(100);
+  const [taskPoints, setTaskPoints] = useState(10);
   const [taskDeadline, setTaskDeadline] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
 
-  // Executive Bonus Points State
+  // Executive Bonus Points State (Updated Options)
   const [bonusMemberId, setBonusMemberId] = useState("");
-  const [bonusPoints, setBonusPoints] = useState(50);
+  const [bonusCategory, setBonusCategory] = useState<string>("leadership");
   const [bonusReason, setBonusReason] = useState("");
   const [awardingBonus, setAwardingBonus] = useState(false);
 
   // Presidential Penalty State
   const [penaltyMemberId, setPenaltyMemberId] = useState("");
-  const [penaltyPoints, setPenaltyPoints] = useState(50);
+  const [penaltyPoints, setPenaltyPoints] = useState(10);
   const [penaltyReason, setPenaltyReason] = useState("");
   const [issuingPenalty, setIssuingPenalty] = useState(false);
+
+  // Custom Modal States for Alerts & Deletion
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; taskId: string | null; title: string }>({
+    isOpen: false, taskId: null, title: ""
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
+    isOpen: false, message: ""
+  });
 
   const supabase = createClient();
 
@@ -119,15 +125,12 @@ export default function TasksPage() {
     const { data: tData } = await taskQuery;
     setTasks(tData || []);
 
-    // 2. Fetch Submissions with explicit foreign key hint to prevent ambiguity
-    const { data: subData, error: subErr } = await supabase
+    // 2. Fetch Submissions
+    const { data: subData } = await supabase
       .from("task_submissions")
       .select("*, task:tasks(*), member:profiles!task_submissions_member_id_fkey(id, full_name, domain, role)")
       .order("created_at", { ascending: false });
     
-    if (subErr) {
-      console.error("Error fetching submissions:", subErr.message);
-    }
     setSubmissions(subData || []);
 
     // 3. Fetch Ledger Points
@@ -147,34 +150,53 @@ export default function TasksPage() {
 
   async function handleAwardBonus(e: React.FormEvent) {
     e.preventDefault();
-    if (!bonusMemberId || !bonusPoints || !bonusReason) return;
+    if (!bonusMemberId) return;
+
+    let finalPoints = 10;
+    let finalReason = "";
+
+    if (bonusCategory === "leadership") {
+      finalPoints = 10;
+      finalReason = "Leadership & Team Support";
+    } else if (bonusCategory === "crisis") {
+      finalPoints = 15;
+      finalReason = "Crisis handling";
+    } else {
+      if (!bonusReason.trim()) {
+        setAlertModal({ isOpen: true, message: "Please specify a reason for 'Other' bonus points." });
+        return;
+      }
+      finalPoints = 10;
+      finalReason = bonusReason.trim();
+    }
+
     setAwardingBonus(true);
 
     const { error } = await supabase.from("points_ledger").insert({
       profile_id: bonusMemberId,
-      points_awarded: parseInt(bonusPoints.toString()),
-      reason: `✨ Executive Bonus (${profile?.role?.replace('_', ' ').toUpperCase() || 'Lead'}): ${bonusReason}`
+      points_awarded: finalPoints,
+      reason: `✨ Executive Bonus (${profile?.role?.replace('_', ' ').toUpperCase() || 'Lead'}): ${finalReason}`
     });
 
     if (error) {
-      alert("Error awarding bonus points: " + error.message);
+      setAlertModal({ isOpen: true, message: "Error awarding bonus points: " + error.message });
       setAwardingBonus(false);
       return;
     }
 
     await supabase.from("notifications").insert({
-      title: `✨ Executive Bonus Awarded: +${bonusPoints} PTS!`,
-      message: `Reason: "${bonusReason}" — Awarded by ${profile?.full_name}`,
+      title: `✨ Executive Bonus Awarded: +${finalPoints} PTS!`,
+      message: `Reason: "${finalReason}" — Awarded by ${profile?.full_name}`,
       target_user_id: bonusMemberId,
       type: "reminder"
     });
 
     setBonusMemberId("");
-    setBonusPoints(50);
+    setBonusCategory("leadership");
     setBonusReason("");
     setAwardingBonus(false);
     setActiveTab("assigned");
-    alert("Executive bonus points awarded successfully!");
+    setAlertModal({ isOpen: true, message: "Executive bonus points awarded successfully!" });
   }
 
   async function handleIssuePenalty(e: React.FormEvent) {
@@ -191,7 +213,7 @@ export default function TasksPage() {
     });
 
     if (error) {
-      alert("Error issuing penalty: " + error.message);
+      setAlertModal({ isOpen: true, message: "Error issuing penalty: " + error.message });
       setIssuingPenalty(false);
       return;
     }
@@ -204,11 +226,11 @@ export default function TasksPage() {
     });
 
     setPenaltyMemberId("");
-    setPenaltyPoints(50);
+    setPenaltyPoints(10);
     setPenaltyReason("");
     setIssuingPenalty(false);
     setActiveTab("assigned");
-    alert("Penalty applied and points deducted successfully.");
+    setAlertModal({ isOpen: true, message: "Penalty applied and points deducted successfully." });
   }
 
   async function handleCreateTask(e: React.FormEvent) {
@@ -218,7 +240,7 @@ export default function TasksPage() {
 
     const targetMember = members.find(m => m.id === taskAssignee);
     if (targetMember && !canReviewSubmission(profile.role, targetMember.role)) {
-      alert(`Hierarchy Restriction: You cannot assign tasks to a member with an equal or higher rank (${targetMember.role}).`);
+      setAlertModal({ isOpen: true, message: `Hierarchy Restriction: You cannot assign tasks to a member with an equal or higher rank (${targetMember.role}).` });
       setCreatingTask(false);
       return;
     }
@@ -228,13 +250,13 @@ export default function TasksPage() {
       description: taskDesc,
       assigned_to: taskAssignee,
       assigned_by: profile.id,
-      points: taskPoints || 100,
+      points: taskPoints || 10,
       deadline: taskDeadline,
       status: "pending"
     });
 
     if (error) {
-      alert("Error creating task: " + error.message);
+      setAlertModal({ isOpen: true, message: "Error creating task: " + error.message });
       setCreatingTask(false);
       return;
     }
@@ -249,16 +271,19 @@ export default function TasksPage() {
     setTaskTitle("");
     setTaskDesc("");
     setTaskAssignee("");
-    setTaskPoints(100);
+    setTaskPoints(10);
     setTaskDeadline("");
     setCreatingTask(false);
     setActiveTab("assigned");
     fetchPageData();
   }
 
-  async function handleDeleteTask(taskId: string) {
-    if (!confirm("Are you sure you want to delete this task?")) return;
-    await supabase.from("tasks").delete().eq("id", taskId);
+  async function confirmAndDeleteTask() {
+    if (!deleteModal.taskId) return;
+    setIsDeleting(true);
+    await supabase.from("tasks").delete().eq("id", deleteModal.taskId);
+    setIsDeleting(false);
+    setDeleteModal({ isOpen: false, taskId: null, title: "" });
     fetchPageData();
   }
 
@@ -296,7 +321,7 @@ export default function TasksPage() {
     });
 
     if (error) {
-      alert("Submission failed: " + error.message);
+      setAlertModal({ isOpen: true, message: "Submission failed: " + error.message });
       setSubmittingWork(false);
       return;
     }
@@ -306,12 +331,12 @@ export default function TasksPage() {
     setSelectedTask(null);
     setSubmittingWork(false);
     fetchPageData();
-    alert("Task deliverable submitted for review!");
+    setAlertModal({ isOpen: true, message: "Task deliverable submitted for review!" });
   }
 
   async function handleReviewSubmission(submission: any, status: "approved" | "rejected") {
     if (!canReviewSubmission(profile.role, submission.member?.role)) {
-      alert(`Hierarchy Protection: As a ${profile.role.replace("_", " ")}, you cannot approve deliverables submitted by a ${submission.member?.role?.replace("_", " ")}.`);
+      setAlertModal({ isOpen: true, message: `Hierarchy Protection: As a ${profile.role.replace("_", " ")}, you cannot approve deliverables submitted by a ${submission.member?.role?.replace("_", " ")}.` });
       return;
     }
 
@@ -319,8 +344,7 @@ export default function TasksPage() {
 
     await supabase.from("task_submissions").update({
       status,
-      reviewed_by: profile.id,
-      review_comment: reviewComment
+      reviewed_by: profile.id
     }).eq("id", submission.id);
 
     if (status === "approved") {
@@ -328,12 +352,12 @@ export default function TasksPage() {
 
       await supabase.from("points_ledger").insert({
         profile_id: submission.member_id,
-        points_awarded: submission.task?.points || 100,
+        points_awarded: submission.task?.points || 10,
         reason: `Completed Task: ${submission.task?.title || 'Deliverable'}`
       });
 
       await supabase.from("notifications").insert({
-        title: `🎉 Task Approved! +${submission.task?.points || 100} PTS`,
+        title: `🎉 Task Approved! +${submission.task?.points || 10} PTS`,
         message: `Your deliverable for "${submission.task?.title}" was approved by ${profile.full_name}.`,
         target_user_id: submission.member_id,
         type: "task"
@@ -341,7 +365,6 @@ export default function TasksPage() {
     }
 
     setReviewingSubmission(null);
-    setReviewComment("");
     setProcessingReview(false);
     fetchPageData();
   }
@@ -370,21 +393,21 @@ export default function TasksPage() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setActiveTab("assigned")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "assigned" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "assigned" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
           >
             Tasks ({tasks.length})
           </button>
           
           <button
             onClick={() => setActiveTab("submissions")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "submissions" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "submissions" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
           >
             Submissions Queue
           </button>
 
           <button
             onClick={() => setActiveTab("ledger")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "ledger" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "ledger" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
           >
             Points History
           </button>
@@ -392,7 +415,7 @@ export default function TasksPage() {
           {isLead && (
             <button
               onClick={() => setActiveTab("create")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "create" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "create" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
             >
               <Plus className="w-3.5 h-3.5" /> Assign Task
             </button>
@@ -401,7 +424,7 @@ export default function TasksPage() {
           {isExecutiveLead && (
             <button
               onClick={() => setActiveTab("bonus")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "bonus" ? "neo-pressed text-amber-500" : "neo-btn text-amber-500"}`}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "bonus" ? "neo-pressed text-amber-500" : "neo-btn text-amber-500"}`}
             >
               <Sparkles className="w-3.5 h-3.5" /> Award Bonus
             </button>
@@ -410,7 +433,7 @@ export default function TasksPage() {
           {isPresident && (
             <button
               onClick={() => setActiveTab("penalty")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "penalty" ? "neo-pressed text-rose-500" : "neo-btn text-rose-500"}`}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "penalty" ? "neo-pressed text-rose-500" : "neo-btn text-rose-500"}`}
             >
               <TrendingDown className="w-3.5 h-3.5" /> Deduct Points
             </button>
@@ -467,7 +490,7 @@ export default function TasksPage() {
                     {!isLead && task.status === 'pending' && (
                       <button
                         onClick={() => setSelectedTask(task)}
-                        className="w-full py-2.5 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2"
+                        className="w-full py-2.5 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2 cursor-pointer"
                       >
                         <Send className="w-3 h-3" /> Submit Deliverable
                       </button>
@@ -477,13 +500,13 @@ export default function TasksPage() {
                       <div className="flex items-center gap-2 pt-2">
                         <button
                           onClick={() => { setReassignTask(task); setNewAssigneeId(task.assigned_to); }}
-                          className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all"
+                          className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
                         >
                           <UserPlus className="w-3 h-3" /> Re-assign
                         </button>
                         <button
-                          onClick={() => handleDeleteTask(task.id)}
-                          className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-rose-500 flex items-center justify-center gap-1 hover:scale-105 transition-all"
+                          onClick={() => setDeleteModal({ isOpen: true, taskId: task.id, title: task.title })}
+                          className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-rose-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
                         >
                           <Trash2 className="w-3 h-3" /> Delete
                         </button>
@@ -543,7 +566,7 @@ export default function TasksPage() {
                         canReview ? (
                           <button
                             onClick={() => setReviewingSubmission(sub)}
-                            className="px-4 py-2 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-wider"
+                            className="px-4 py-2 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer"
                           >
                             Review Work
                           </button>
@@ -599,7 +622,7 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* TAB 4: Assign Task Form */}
+      {/* TAB 4: Assign Task Form (With updated 5, 10, 15, 20, 25 options) */}
       {activeTab === "create" && isLead && (
         <form onSubmit={handleCreateTask} className="neo-flat rounded-2xl p-6 max-w-xl space-y-4">
           <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Assign Member Deliverable</h3>
@@ -617,7 +640,7 @@ export default function TasksPage() {
             required
             value={taskAssignee}
             onChange={(e) => setTaskAssignee(e.target.value)}
-            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
+            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
           >
             <option value="" className="bg-[var(--bg-surface)]">-- Select Assignee Member --</option>
             {members.map(m => (
@@ -630,13 +653,18 @@ export default function TasksPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Reward Points</label>
-              <input
-                type="number"
+              <select
                 required
                 value={taskPoints}
                 onChange={(e) => setTaskPoints(parseInt(e.target.value))}
-                className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
-              />
+                className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
+              >
+                <option value={5} className="bg-[var(--bg-surface)]">5 Points</option>
+                <option value={10} className="bg-[var(--bg-surface)]">10 Points</option>
+                <option value={15} className="bg-[var(--bg-surface)]">15 Points</option>
+                <option value={20} className="bg-[var(--bg-surface)]">20 Points</option>
+                <option value={25} className="bg-[var(--bg-surface)]">25 Points</option>
+              </select>
             </div>
 
             <div>
@@ -659,13 +687,13 @@ export default function TasksPage() {
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium custom-scrollbar resize-none"
           />
 
-          <button type="submit" disabled={creatingTask} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+          <button type="submit" disabled={creatingTask} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer">
             {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckSquare className="w-4 h-4" /> Assign Task & Send Alert</>}
           </button>
         </form>
       )}
 
-      {/* TAB 5: Award Executive Bonus Points */}
+      {/* TAB 5: Award Executive Bonus Points (With specialized options) */}
       {activeTab === "bonus" && isExecutiveLead && (
         <form onSubmit={handleAwardBonus} className="neo-flat rounded-2xl p-6 max-w-xl space-y-4">
           <div className="flex items-center gap-2 text-amber-500">
@@ -678,7 +706,7 @@ export default function TasksPage() {
             required
             value={bonusMemberId}
             onChange={(e) => setBonusMemberId(e.target.value)}
-            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
+            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium cursor-pointer"
           >
             <option value="" className="bg-[var(--bg-surface)]">-- Select Member for Bonus --</option>
             {members.map(m => (
@@ -689,28 +717,31 @@ export default function TasksPage() {
           </select>
 
           <div>
-            <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Bonus Points Value</label>
-            <input
-              type="number"
+            <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Bonus Category & Points</label>
+            <select
               required
-              min={10}
-              max={500}
-              value={bonusPoints}
-              onChange={(e) => setBonusPoints(parseInt(e.target.value))}
-              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
-            />
+              value={bonusCategory}
+              onChange={(e) => setBonusCategory(e.target.value)}
+              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium cursor-pointer"
+            >
+              <option value="leadership" className="bg-[var(--bg-surface)]">Leadership & Team Support - 10 Points</option>
+              <option value="crisis" className="bg-[var(--bg-surface)]">Crisis handling - 15 Points</option>
+              <option value="other" className="bg-[var(--bg-surface)]">Other - 10 Points (Reason Required)</option>
+            </select>
           </div>
 
-          <textarea
-            required
-            placeholder="Reason for bonus points..."
-            rows={4}
-            value={bonusReason}
-            onChange={(e) => setBonusReason(e.target.value)}
-            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium custom-scrollbar resize-none"
-          />
+          {bonusCategory === "other" && (
+            <textarea
+              required
+              placeholder="Specify reason for bonus points..."
+              rows={3}
+              value={bonusReason}
+              onChange={(e) => setBonusReason(e.target.value)}
+              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium custom-scrollbar resize-none"
+            />
+          )}
 
-          <button type="submit" disabled={awardingBonus} className="w-full py-3.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest text-amber-500 hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2 border border-amber-500/30">
+          <button type="submit" disabled={awardingBonus} className="w-full py-3.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest text-amber-500 hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2 border border-amber-500/30 cursor-pointer">
             {awardingBonus ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Sparkles className="w-4 h-4" /> Award Bonus Points & Notify Member</>}
           </button>
         </form>
@@ -729,7 +760,7 @@ export default function TasksPage() {
             required
             value={penaltyMemberId}
             onChange={(e) => setPenaltyMemberId(e.target.value)}
-            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-rose-500 font-medium"
+            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-rose-500 font-medium cursor-pointer"
           >
             <option value="" className="bg-[var(--bg-surface)]">-- Select Member for Deduction --</option>
             {members.map(m => (
@@ -744,8 +775,8 @@ export default function TasksPage() {
             <input
               type="number"
               required
-              min={10}
-              max={500}
+              min={5}
+              max={100}
               value={penaltyPoints}
               onChange={(e) => setPenaltyPoints(parseInt(e.target.value))}
               className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-rose-500 font-medium text-rose-500"
@@ -761,7 +792,7 @@ export default function TasksPage() {
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-rose-500 font-medium custom-scrollbar resize-none"
           />
 
-          <button type="submit" disabled={issuingPenalty} className="w-full py-3.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-2 border border-rose-500/30">
+          <button type="submit" disabled={issuingPenalty} className="w-full py-3.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-2 border border-rose-500/30 cursor-pointer">
             {issuingPenalty ? <Loader2 className="w-4 h-4 animate-spin" /> : <><TrendingDown className="w-4 h-4" /> Issue Penalty & Deduct Points</>}
           </button>
         </form>
@@ -770,7 +801,7 @@ export default function TasksPage() {
       {/* Re-assign Task Modal */}
       {reassignTask && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleReassignTask} className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95">
+          <form onSubmit={handleReassignTask} className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95 bg-[var(--bg-base)]">
             <h3 className="text-xs font-black uppercase tracking-widest text-amber-500">Re-assign Deliverable</h3>
             <p className="text-xs font-bold">{reassignTask.title}</p>
 
@@ -778,7 +809,7 @@ export default function TasksPage() {
               required
               value={newAssigneeId}
               onChange={(e) => setNewAssigneeId(e.target.value)}
-              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
             >
               <option value="" className="bg-[var(--bg-surface)]">-- Select New Member --</option>
               {members.map(m => (
@@ -792,14 +823,14 @@ export default function TasksPage() {
               <button
                 type="button"
                 onClick={() => setReassignTask(null)}
-                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isReassigning}
-                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-amber-500 flex justify-center items-center gap-2 border border-amber-500/30"
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-amber-500 flex justify-center items-center gap-2 border border-amber-500/30 cursor-pointer"
               >
                 {isReassigning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm"}
               </button>
@@ -811,7 +842,7 @@ export default function TasksPage() {
       {/* Member Work Submission Modal */}
       {selectedTask && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleSubmitTaskWork} className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95">
+          <form onSubmit={handleSubmitTaskWork} className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95 bg-[var(--bg-base)]">
             <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Submit Work: {selectedTask.title}</h3>
             
             <input
@@ -828,21 +859,21 @@ export default function TasksPage() {
               rows={3}
               value={submissionNotes}
               onChange={(e) => setSubmissionNotes(e.target.value)}
-              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none"
+              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none custom-scrollbar"
             />
 
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setSelectedTask(null)}
-                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={submittingWork}
-                className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold flex justify-center items-center gap-2"
+                className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold flex justify-center items-center gap-2 cursor-pointer"
               >
                 {submittingWork ? <Loader2 className="w-4 h-4 animate-spin" /> : "Submit Work"}
               </button>
@@ -854,7 +885,7 @@ export default function TasksPage() {
       {/* Lead Review & Grade Modal */}
       {reviewingSubmission && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95">
+          <div className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95 bg-[var(--bg-base)]">
             <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Review Deliverable</h3>
             
             <p className="text-xs font-bold">{reviewingSubmission.task?.title}</p>
@@ -886,7 +917,7 @@ export default function TasksPage() {
                 type="button"
                 onClick={() => handleReviewSubmission(reviewingSubmission, "rejected")}
                 disabled={processingReview}
-                className="w-1/2 py-3 neo-btn text-rose-500 rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn text-rose-500 rounded-xl text-xs font-bold cursor-pointer"
               >
                 Request Revision
               </button>
@@ -895,11 +926,74 @@ export default function TasksPage() {
                 type="button"
                 onClick={() => handleReviewSubmission(reviewingSubmission, "approved")}
                 disabled={processingReview}
-                className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold cursor-pointer"
               >
                 Approve & Award
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirmation Dialog Modal for Task Deletion */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Confirm Deletion</h3>
+                <p className="text-[10px] opacity-60 font-semibold">Action is permanent</p>
+              </div>
+            </div>
+
+            <div className="neo-pressed rounded-2xl p-4 space-y-1">
+              <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Task to Delete:</p>
+              <p className="text-xs font-bold truncate text-[var(--text-main)]">"{deleteModal.title}"</p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ isOpen: false, taskId: null, title: "" })}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={confirmAndDeleteTask}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30 cursor-pointer"
+              >
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Task"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 text-emerald-500">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Notification</h3>
+            </div>
+
+            <p className="text-xs opacity-80 leading-relaxed px-1 text-[var(--text-main)]">{alertModal.message}</p>
+
+            <button
+              onClick={() => setAlertModal({ isOpen: false, message: "" })}
+              className="w-full py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer"
+            >
+              Okay
+            </button>
           </div>
         </div>
       )}

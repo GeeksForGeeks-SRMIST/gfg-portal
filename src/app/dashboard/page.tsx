@@ -19,7 +19,8 @@ import {
   CheckCircle2,
   Plus,
   Loader2,
-  Trash2
+  Trash2,
+  AlertTriangle
 } from "lucide-react";
 import Link from "next/link";
 
@@ -48,6 +49,14 @@ export default function DashboardOverview() {
   const [eventDate, setEventDate] = useState("");
   const [eventLocation, setEventLocation] = useState("");
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+
+  // Custom Professional Confirmation Dialog State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ isOpen: boolean; eventId: string | null; title: string }>({
+    isOpen: false,
+    eventId: null,
+    title: ""
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const supabase = createClient();
 
@@ -163,19 +172,21 @@ export default function DashboardOverview() {
     fetchDashboardData();
   }
 
-  async function handleDeleteEvent(eventId: string, e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this event?")) return;
-    
-    // Optimistically remove from state immediately
-    setUpcomingEvents(prev => prev.filter(evt => evt.id !== eventId));
+  async function confirmAndDeleteEvent() {
+    if (!deleteConfirmModal.eventId) return;
+    setIsDeleting(true);
 
-    const { error } = await supabase.from("events").delete().eq("id", eventId);
+    const targetId = deleteConfirmModal.eventId;
+    setUpcomingEvents(prev => prev.filter(evt => evt.id !== targetId));
+
+    const { error } = await supabase.from("events").delete().eq("id", targetId);
     if (error) {
       alert("Error deleting event: " + error.message);
       fetchDashboardData();
     }
+
+    setIsDeleting(false);
+    setDeleteConfirmModal({ isOpen: false, eventId: null, title: "" });
   }
 
   if (!profile) {
@@ -455,7 +466,7 @@ export default function DashboardOverview() {
                   </div>
                   {isLead && (
                     <button
-                      onClick={(e) => handleDeleteEvent(evt.id, e)}
+                      onClick={() => setDeleteConfirmModal({ isOpen: true, eventId: evt.id, title: evt.title })}
                       className="p-2 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-colors shrink-0"
                       title="Delete Event"
                     >
@@ -494,9 +505,50 @@ export default function DashboardOverview() {
 
       </div>
 
+      {/* Custom Professional Confirmation Dialog Modal */}
+      {deleteConfirmModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Confirm Deletion</h3>
+                <p className="text-[10px] opacity-60 font-semibold">Action is permanent</p>
+              </div>
+            </div>
+
+            <div className="neo-pressed rounded-2xl p-4 space-y-1">
+              <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Event to Delete:</p>
+              <p className="text-xs font-bold truncate text-[var(--text-main)]">"{deleteConfirmModal.title}"</p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmModal({ isOpen: false, eventId: null, title: "" })}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={confirmAndDeleteEvent}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30"
+              >
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Event"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Add Event Modal */}
       {showAddEventModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleQuickAddEvent} className="w-full max-w-md neo-flat rounded-3xl p-6 space-y-4 animate-in zoom-in-95 bg-[var(--bg-base)]">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <form onSubmit={handleQuickAddEvent} className="w-full max-w-md neo-flat rounded-3xl p-6 space-y-4 animate-in zoom-in-95 bg-[var(--bg-base)] shadow-2xl border border-white/10">
             <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500">Schedule Chapter Event</h3>
             
             <input

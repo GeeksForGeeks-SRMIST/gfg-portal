@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { MessageSquareHeart, Plus, CheckCircle2, XCircle, ShieldCheck, Loader2, Trash2, EyeOff, Sparkles, Flame, Laugh, Heart, Globe } from "lucide-react";
+import { MessageSquareHeart, Plus, CheckCircle2, XCircle, ShieldCheck, Loader2, Trash2, EyeOff, Sparkles, Flame, Laugh, Heart, Globe, AlertTriangle } from "lucide-react";
 
 export default function ConfessionsPage() {
   const [profile, setProfile] = useState<any>(null);
@@ -14,6 +14,15 @@ export default function ConfessionsPage() {
   const [message, setMessage] = useState("");
   const [category, setCategory] = useState("General");
   const [submitting, setSubmitting] = useState(false);
+
+  // Custom Modal States (Replacing browser alerts & confirms)
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
+    isOpen: false, message: ""
+  });
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; confessionId: string | null; messageSnippet: string }>({
+    isOpen: false, confessionId: null, messageSnippet: ""
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const supabase = createClient();
 
@@ -52,9 +61,9 @@ export default function ConfessionsPage() {
     });
 
     if (error) {
-      alert("Failed to submit confession: " + error.message);
+      setAlertModal({ isOpen: true, message: "Failed to submit confession: " + error.message });
     } else {
-      alert("Anonymous confession submitted successfully! It will appear on the feed after admin approval.");
+      setAlertModal({ isOpen: true, message: "Anonymous confession submitted successfully! It will appear on the feed after admin approval." });
       setMessage("");
       setActiveTab("feed");
       fetchData();
@@ -69,17 +78,25 @@ export default function ConfessionsPage() {
       .eq("id", id);
 
     if (error) {
-      alert("Error updating status: " + error.message);
+      setAlertModal({ isOpen: true, message: "Error updating status: " + error.message });
     } else {
       fetchData();
     }
   }
 
-  async function handleDeleteConfession(id: string) {
-    if (!confirm("Are you sure you want to delete this confession?")) return;
-    const { error } = await supabase.from("confessions").delete().eq("id", id);
-    if (error) alert("Error deleting: " + error.message);
-    else fetchData();
+  async function confirmAndDeleteConfession() {
+    if (!deleteModal.confessionId) return;
+    setIsDeleting(true);
+
+    const { error } = await supabase.from("confessions").delete().eq("id", deleteModal.confessionId);
+    setIsDeleting(false);
+    setDeleteModal({ isOpen: false, confessionId: null, messageSnippet: "" });
+
+    if (error) {
+      setAlertModal({ isOpen: true, message: "Error deleting: " + error.message });
+    } else {
+      fetchData();
+    }
   }
 
   // Category Styling Helper
@@ -144,20 +161,20 @@ export default function ConfessionsPage() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setActiveTab("feed")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "feed" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "feed" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
           >
             Confessions Feed ({approvedConfessions.length})
           </button>
           <button
             onClick={() => setActiveTab("submit")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "submit" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "submit" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
           >
             <Plus className="w-3.5 h-3.5" /> Submit Anonymous
           </button>
           {isExecutiveAdmin && (
             <button
               onClick={() => setActiveTab("moderation")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "moderation" ? "neo-pressed text-amber-500" : "neo-btn text-amber-500"}`}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "moderation" ? "neo-pressed text-amber-500" : "neo-btn text-amber-500"}`}
             >
               <ShieldCheck className="w-3.5 h-3.5" /> Moderation ({pendingConfessions.length})
             </button>
@@ -195,8 +212,8 @@ export default function ConfessionsPage() {
                       <span className="flex items-center gap-1 font-bold text-emerald-500/80"><EyeOff className="w-3 h-3" /> Anonymous Member</span>
                       {isExecutiveAdmin && (
                         <button
-                          onClick={() => handleDeleteConfession(conf.id)}
-                          className="p-1.5 rounded-lg text-rose-500 neo-btn hover:scale-105 transition-all"
+                          onClick={() => setDeleteModal({ isOpen: true, confessionId: conf.id, messageSnippet: conf.message.substring(0, 40) + "..." })}
+                          className="p-1.5 rounded-lg text-rose-500 neo-btn hover:scale-105 transition-all cursor-pointer"
                           title="Delete Confession"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -225,7 +242,7 @@ export default function ConfessionsPage() {
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
+              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
             >
               <option value="General" className="bg-[var(--bg-surface)]">💬 General Confession</option>
               <option value="Campus Life" className="bg-[var(--bg-surface)]">🏛️ Campus Life & SRM</option>
@@ -247,7 +264,7 @@ export default function ConfessionsPage() {
             />
           </div>
 
-          <button type="submit" disabled={submitting} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+          <button type="submit" disabled={submitting} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer">
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Submit Confession Anonymously</>}
           </button>
         </form>
@@ -277,13 +294,13 @@ export default function ConfessionsPage() {
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={() => handleUpdateStatus(conf.id, "approved")}
-                        className="px-3 py-2 neo-btn-green rounded-xl text-xs font-bold flex items-center gap-1"
+                        className="px-3 py-2 neo-btn-green rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" /> Approve
                       </button>
                       <button
                         onClick={() => handleUpdateStatus(conf.id, "rejected")}
-                        className="px-3 py-2 neo-btn rounded-xl text-rose-500 text-xs font-bold flex items-center gap-1"
+                        className="px-3 py-2 neo-btn rounded-xl text-rose-500 text-xs font-bold flex items-center gap-1 cursor-pointer"
                       >
                         <XCircle className="w-3.5 h-3.5" /> Reject
                       </button>
@@ -293,6 +310,69 @@ export default function ConfessionsPage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Custom Confirmation Dialog Modal for Deletion */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Confirm Deletion</h3>
+                <p className="text-[10px] opacity-60 font-semibold">Action is permanent</p>
+              </div>
+            </div>
+
+            <div className="neo-pressed rounded-2xl p-4 space-y-1">
+              <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Confession Snippet:</p>
+              <p className="text-xs font-bold italic truncate text-[var(--text-main)]">"{deleteModal.messageSnippet}"</p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ isOpen: false, confessionId: null, messageSnippet: "" })}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={confirmAndDeleteConfession}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30 cursor-pointer"
+              >
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Confession"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 text-emerald-500">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Notification</h3>
+            </div>
+
+            <p className="text-xs opacity-80 leading-relaxed px-1 text-[var(--text-main)]">{alertModal.message}</p>
+
+            <button
+              onClick={() => setAlertModal({ isOpen: false, message: "" })}
+              className="w-full py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer"
+            >
+              Okay
+            </button>
+          </div>
         </div>
       )}
 

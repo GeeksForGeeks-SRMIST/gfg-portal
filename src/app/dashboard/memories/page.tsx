@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Image as ImageIcon, Plus, Calendar, Tag, Trash2, Loader2, Sparkles, User, Upload, MessageCircle } from "lucide-react";
+import { Image as ImageIcon, Plus, Calendar, Tag, Trash2, Loader2, Sparkles, User, Upload, MessageCircle, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 export default function MemoriesPage() {
   const [profile, setProfile] = useState<any>(null);
@@ -18,6 +18,15 @@ export default function MemoriesPage() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Custom Modal States (Replacing browser alerts & confirms)
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
+    isOpen: false, message: ""
+  });
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; memoryObj: any | null }>({
+    isOpen: false, memoryObj: null
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const supabase = createClient();
 
@@ -46,7 +55,7 @@ export default function MemoriesPage() {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
-        alert("File size must be less than 5MB");
+        setAlertModal({ isOpen: true, message: "File size must be less than 5MB" });
         return;
       }
       setImageFile(file);
@@ -85,7 +94,7 @@ export default function MemoriesPage() {
     });
 
     if (error) {
-      alert("Failed to share memory: " + error.message);
+      setAlertModal({ isOpen: true, message: "Failed to share memory: " + error.message });
     } else {
       setEventTitle("");
       setDescription("");
@@ -99,18 +108,28 @@ export default function MemoriesPage() {
 
   const isPrivileged = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(profile?.role);
 
-  async function handleDeleteMemory(mem: any) {
+  const promptDeleteMemory = (mem: any) => {
     const canDelete = isPrivileged || mem.member_id === profile?.id;
     if (!canDelete) {
-      alert("You can only delete your own memories.");
+      setAlertModal({ isOpen: true, message: "You can only delete your own memories." });
       return;
     }
+    setDeleteModal({ isOpen: true, memoryObj: mem });
+  };
 
-    if (!confirm("Delete this memory message?")) return;
+  async function confirmAndDeleteMemory() {
+    if (!deleteModal.memoryObj) return;
+    setIsDeleting(true);
 
-    const { error } = await supabase.from("memories").delete().eq("id", mem.id);
-    if (error) alert("Error deleting: " + error.message);
-    else fetchData();
+    const { error } = await supabase.from("memories").delete().eq("id", deleteModal.memoryObj.id);
+    setIsDeleting(false);
+    setDeleteModal({ isOpen: false, memoryObj: null });
+
+    if (error) {
+      setAlertModal({ isOpen: true, message: "Error deleting: " + error.message });
+    } else {
+      fetchData();
+    }
   }
 
   // Generate distinct chat bubble accent colors based on member ID string
@@ -147,13 +166,13 @@ export default function MemoriesPage() {
         <div className="flex gap-2">
           <button
             onClick={() => setActiveTab("feed")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "feed" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "feed" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
           >
             Chat Feed ({memories.length})
           </button>
           <button
             onClick={() => setActiveTab("create")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "create" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "create" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
           >
             <Plus className="w-3.5 h-3.5" /> Post Memory
           </button>
@@ -196,8 +215,8 @@ export default function MemoriesPage() {
 
                     {canModify && (
                       <button
-                        onClick={() => handleDeleteMemory(mem)}
-                        className="p-1.5 neo-btn rounded-lg text-rose-500 hover:scale-105 transition-all"
+                        onClick={() => promptDeleteMemory(mem)}
+                        className="p-1.5 neo-btn rounded-lg text-rose-500 hover:scale-105 transition-all cursor-pointer"
                         title="Delete message"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -308,19 +327,82 @@ export default function MemoriesPage() {
             <button
               type="button"
               onClick={() => setActiveTab("feed")}
-              className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold"
+              className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex justify-center items-center gap-2"
+              className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex justify-center items-center gap-2 cursor-pointer"
             >
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Post Message"}
             </button>
           </div>
         </form>
+      )}
+
+      {/* Custom Confirmation Dialog Modal for Deletion */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Confirm Deletion</h3>
+                <p className="text-[10px] opacity-60 font-semibold">Action is permanent</p>
+              </div>
+            </div>
+
+            <div className="neo-pressed rounded-2xl p-4 space-y-1">
+              <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Memory Event:</p>
+              <p className="text-xs font-bold truncate text-[var(--text-main)]">"{deleteModal.memoryObj?.event_title}"</p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ isOpen: false, memoryObj: null })}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={confirmAndDeleteMemory}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30 cursor-pointer"
+              >
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Memory"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 text-emerald-500">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Notification</h3>
+            </div>
+
+            <p className="text-xs opacity-80 leading-relaxed px-1 text-[var(--text-main)]">{alertModal.message}</p>
+
+            <button
+              onClick={() => setAlertModal({ isOpen: false, message: "" })}
+              className="w-full py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer"
+            >
+              Okay
+            </button>
+          </div>
+        </div>
       )}
 
     </div>

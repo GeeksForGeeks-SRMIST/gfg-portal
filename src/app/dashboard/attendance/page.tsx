@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { CalendarCheck, CheckCircle2, XCircle, Users, ClipboardList, Plus, Loader2, Trash2 } from "lucide-react";
+import { CalendarCheck, CheckCircle2, XCircle, Users, ClipboardList, Loader2, Trash2, AlertTriangle } from "lucide-react";
 
 export default function AttendancePage() {
   const [profile, setProfile] = useState<any>(null);
@@ -18,6 +18,15 @@ export default function AttendancePage() {
   const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
 
+  // Custom Modal States
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
+    isOpen: false, message: ""
+  });
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; sessionId: string | null; title: string }>({
+    isOpen: false, sessionId: null, title: ""
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const supabase = createClient();
 
   useEffect(() => {
@@ -29,7 +38,6 @@ export default function AttendancePage() {
       const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
       setProfile(userProfile);
 
-      // If Domain Director, lock session domain to their domain
       if (userProfile?.role === "domain_director") {
         setSessionDomain(userProfile.domain);
       }
@@ -41,7 +49,6 @@ export default function AttendancePage() {
   }, []);
 
   async function fetchData(userProfile: any) {
-    // 1. Fetch eligible members based on role hierarchy
     let memberQuery = supabase.from("profiles").select("*").eq("status", "approved");
     if (userProfile?.role === "domain_director") {
       memberQuery = memberQuery.eq("domain", userProfile.domain);
@@ -49,20 +56,17 @@ export default function AttendancePage() {
     const { data: memberData } = await memberQuery;
     setMembers(memberData || []);
 
-    // Default everyone to present when opening the sheet
     const initialMap: Record<string, boolean> = {};
     memberData?.forEach((m) => {
       initialMap[m.id] = true;
     });
     setAttendanceMap(initialMap);
 
-    // 2. Fetch Attendance Sessions & Records with Creator Profile info
     let sessionQuery = supabase
       .from("attendance_sessions")
       .select("*, creator:profiles!attendance_sessions_created_by_fkey(full_name, role), attendance_records(*, profiles(full_name, srm_email, reg_number, domain))")
       .order("date", { ascending: false });
 
-    // If Domain Director, only show sessions matching their domain or 'all'
     if (userProfile?.role === "domain_director") {
       sessionQuery = sessionQuery.or(`domain.eq.${userProfile.domain},domain.eq.all`);
     }
@@ -85,17 +89,19 @@ export default function AttendancePage() {
   async function handleSaveAttendance(e: React.FormEvent) {
     e.preventDefault();
     if (!sessionTitle.trim()) {
-      alert("Please provide a reason or purpose for this attendance session.");
+      setAlertModal({ isOpen: true, message: "Please provide a reason or purpose for this attendance session." });
       return;
     }
 
     setSubmitting(true);
 
+    const sessionDomainValue = isDomainDirector ? profile.domain : sessionDomain;
+
     const { data: sessionRes, error: sessionErr } = await supabase
       .from("attendance_sessions")
       .insert({
         title: sessionTitle,
-        domain: isDomainDirector ? profile.domain : sessionDomain,
+        domain: sessionDomainValue,
         date: sessionDate,
         created_by: profile.id
       })
@@ -103,7 +109,7 @@ export default function AttendancePage() {
       .single();
 
     if (sessionErr || !sessionRes) {
-      alert("Failed to create session: " + sessionErr?.message);
+      setAlertModal({ isOpen: true, message: "Failed to create session: " + sessionErr?.message });
       setSubmitting(false);
       return;
     }
@@ -117,46 +123,73 @@ export default function AttendancePage() {
     const { error: recordErr } = await supabase.from("attendance_records").insert(recordsToInsert);
 
     if (recordErr) {
-      alert("Failed to save records: " + recordErr.message);
-    } else {
-      alert("Attendance records successfully saved with detailed logs!");
-      setSessionTitle("");
-      setActiveTab("logs");
-      fetchData(profile);
-    }
-
-    setSubmitting(false);
-  }
-
-  async function handleDeleteSession(sessionId: string) {
-    if (!confirm("Are you sure you want to delete this attendance session and all its records?")) return;
-
-    // 1. Delete associated records first
-    const { error: recErr } = await supabase
-      .from("attendance_records")
-      .delete()
-      .eq("session_id", sessionId);
-
-    if (recErr) {
-      alert("Failed to delete attendance records: " + recErr.message);
+      setAlertModal({ isOpen: true, message: "Failed to save records: " + recordErr.message });
+      setSubmitting(false);
       return;
     }
 
-    // 2. Delete the session itself
+    // ROBUST AUTOMATIC 5 MARKS AWARDING & NOTIFICATIONS FOR PRESENT MEMBERS
+    const presentMembers = members.filter(m => attendanceMap[m.id]);
+
+    for (const member of presentMembers) {
+      // 1. Insert into points_ledger
+      const { error: ledgerErr } = await supabase.from("points_ledger").insert({
+        profile_id: member.id,
+        points_awarded: 5,
+        reason: `Attendance: ${sessionTitle} (${sessionDate})`
+      });
+
+      if (ledgerErr) {
+        console.error(`Failed to award points to ${member.full_name}:`, ledgerErr.message);
+      }
+
+      // 2. Insert notification
+      await supabase.from("notifications").insert({
+        title: `✅ Attendance Marked: +5 PTS!`,
+        message: `You were marked present for "${sessionTitle}". 5 points added to your ledger.`,
+        target_user_id: member.id,
+        type: "task"
+      });
+    }
+
+    setAlertModal({ isOpen: true, message: `Attendance successfully recorded! +5 points awarded to ${presentMembers.length} present members.` });
+    setSessionTitle("");
+    setActiveTab("logs");
+    await fetchData(profile);
+    setSubmitting(false);
+  }
+
+  async function confirmAndDeleteSession() {
+    if (!deleteModal.sessionId) return;
+    setIsDeleting(true);
+
+    const { error: recErr } = await supabase
+      .from("attendance_records")
+      .delete()
+      .eq("session_id", deleteModal.sessionId);
+
+    if (recErr) {
+      setAlertModal({ isOpen: true, message: "Failed to delete attendance records: " + recErr.message });
+      setIsDeleting(false);
+      return;
+    }
+
     const { error: sessionErr } = await supabase
       .from("attendance_sessions")
       .delete()
-      .eq("id", sessionId);
+      .eq("id", deleteModal.sessionId);
+
+    setIsDeleting(false);
+    setDeleteModal({ isOpen: false, sessionId: null, title: "" });
 
     if (sessionErr) {
-      alert("Failed to delete session: " + sessionErr.message);
+      setAlertModal({ isOpen: true, message: "Failed to delete session: " + sessionErr.message });
     } else {
-      alert("Attendance session deleted successfully.");
-      fetchData(profile);
+      setAlertModal({ isOpen: true, message: "Attendance session deleted successfully." });
+      await fetchData(profile);
     }
   }
 
-  // Calculate Personal Stats for Regular Members / Admins
   const mySessions = sessions.filter((s) => s.attendance_records?.some((r: any) => r.user_id === profile?.id));
   const myPresent = mySessions.filter((s) => s.attendance_records?.find((r: any) => r.user_id === profile?.id)?.status === "present").length;
   const totalMySessions = mySessions.length;
@@ -187,14 +220,14 @@ export default function AttendancePage() {
         <div className="flex gap-2">
           <button
             onClick={() => setActiveTab("logs")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "logs" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "logs" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
           >
             Session Records
           </button>
           {canTakeAttendance && (
             <button
               onClick={() => setActiveTab("take")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === "take" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "take" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
             >
               Take Attendance
             </button>
@@ -221,10 +254,10 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          {/* Session History & Detailed Breakdown (Visible to all members) */}
+          {/* Session History & Detailed Breakdown */}
           <div className="neo-flat rounded-[2rem] p-6 space-y-4">
             <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500 px-1">
-              Detailed Attendance Logs & Member Breakdown
+              Detailed Attendance Logs & Member Breakdown (+5 Marks per attendance)
             </h3>
 
             <div className="space-y-4">
@@ -255,8 +288,8 @@ export default function AttendancePage() {
                           </div>
                           {canTakeAttendance && (
                             <button
-                              onClick={() => handleDeleteSession(session.id)}
-                              className="p-2 rounded-xl text-rose-500 neo-btn hover:scale-105 transition-all"
+                              onClick={() => setDeleteModal({ isOpen: true, sessionId: session.id, title: session.title })}
+                              className="p-2 rounded-xl text-rose-500 neo-btn hover:scale-105 transition-all cursor-pointer"
                               title="Delete Attendance Record"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -265,7 +298,6 @@ export default function AttendancePage() {
                         </div>
                       </div>
 
-                      {/* Detailed Present & Absent Lists (Now visible to everyone) */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
                         {/* Present Column */}
                         <div className="bg-emerald-500/5 border border-emerald-500/15 rounded-xl p-3 space-y-2">
@@ -310,13 +342,13 @@ export default function AttendancePage() {
         </div>
       )}
 
-      {/* TAB 2: TAKE ATTENDANCE (Admins & Domain Directors) */}
+      {/* TAB 2: TAKE ATTENDANCE */}
       {activeTab === "take" && canTakeAttendance && (
         <form onSubmit={handleSaveAttendance} className="neo-flat rounded-[2rem] p-6 space-y-5 max-w-3xl mx-auto">
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
             <ClipboardList className="w-5 h-5 text-emerald-500" />
             <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500">
-              Take Attendance Sheet {isDomainDirector && `(${profile.domain.toUpperCase()} Domain)`}
+              Take Attendance Sheet {isDomainDirector && `(${profile.domain.toUpperCase()} Domain)`} — Awards +5 PTS
             </h3>
           </div>
 
@@ -351,7 +383,7 @@ export default function AttendancePage() {
               <select
                 value={sessionDomain}
                 onChange={(e) => setSessionDomain(e.target.value)}
-                className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
               >
                 <option value="all" className="bg-[var(--bg-surface)]">All Domains / General Meet</option>
                 <option value="technical" className="bg-[var(--bg-surface)]">Technical Domain</option>
@@ -364,7 +396,7 @@ export default function AttendancePage() {
 
           <div className="space-y-2">
             <label className="text-[10px] font-bold uppercase opacity-60 px-1 block">
-              Mark Member Presence ({members.length} {isDomainDirector ? `${profile.domain} members` : 'total members'})
+              Mark Member Presence ({members.length} {isDomainDirector ? `${profile.domain} members` : 'total members'}) — Present members earn +5 PTS
             </label>
             <div className="neo-pressed rounded-xl p-4 max-h-72 overflow-y-auto space-y-2 custom-scrollbar">
               {members.map((m) => {
@@ -386,7 +418,7 @@ export default function AttendancePage() {
                         isPresent ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30" : "bg-rose-500/20 text-rose-500 border border-rose-500/30"
                       }`}
                     >
-                      {isPresent ? "Present" : "Absent"}
+                      {isPresent ? "Present (+5 PTS)" : "Absent"}
                     </button>
                   </div>
                 );
@@ -394,10 +426,73 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          <button type="submit" disabled={submitting} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Save Attendance Record</>}
+          <button type="submit" disabled={submitting} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer">
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Save Attendance & Award 5 PTS</>}
           </button>
         </form>
+      )}
+
+      {/* Custom Confirmation Dialog Modal for Deletion */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Confirm Deletion</h3>
+                <p className="text-[10px] opacity-60 font-semibold">Action is permanent</p>
+              </div>
+            </div>
+
+            <div className="neo-pressed rounded-2xl p-4 space-y-1">
+              <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Session to Delete:</p>
+              <p className="text-xs font-bold truncate text-[var(--text-main)]">"{deleteModal.title}"</p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ isOpen: false, sessionId: null, title: "" })}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={confirmAndDeleteSession}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30 cursor-pointer"
+              >
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Session"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 text-emerald-500">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Notification</h3>
+            </div>
+
+            <p className="text-xs opacity-80 leading-relaxed px-1 text-[var(--text-main)]">{alertModal.message}</p>
+
+            <button
+              onClick={() => setAlertModal({ isOpen: false, message: "" })}
+              className="w-full py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer"
+            >
+              Okay
+            </button>
+          </div>
+        </div>
       )}
 
     </div>
