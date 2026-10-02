@@ -1,4 +1,4 @@
--- 1. Create Enums
+-- 1. Create Custom Enums
 CREATE TYPE app_role AS ENUM (
   'president',
   'secretary',
@@ -43,7 +43,7 @@ CREATE TABLE profile_private (
   fa_email TEXT
 );
 
--- 4. Helper Function to Check Roles Safely (Bypasses RLS Recursion)
+-- 4. Helper Function for Role Checks
 CREATE OR REPLACE FUNCTION auth_user_role()
 RETURNS app_role
 LANGUAGE sql
@@ -54,7 +54,7 @@ AS $$
   SELECT role FROM profiles WHERE id = auth.uid();
 $$;
 
--- 5. Enable RLS
+-- 5. Enable Row Level Security (RLS)
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profile_private ENABLE ROW LEVEL SECURITY;
 

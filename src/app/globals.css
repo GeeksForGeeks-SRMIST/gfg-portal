@@ -2,61 +2,99 @@
 
 @theme {
   --color-gfg-green: #2f8d46;
+  --color-gfg-dark: #1e5e2f;
+  --color-gfg-glow: rgba(47, 141, 70, 0.35);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui;
 }
 
 :root {
-  --bg-base: #e0e5ec;
-  --text-main: #2d3748;
-  --neo-out-1: rgba(163, 177, 198, 0.6);
-  --neo-out-2: rgba(255, 255, 255, 0.8);
-  --neo-in-1: rgba(163, 177, 198, 0.6);
-  --neo-in-2: rgba(255, 255, 255, 0.8);
+  /* Rich Warm Porcelain Off-White Canvas */
+  --bg-base: #f4f6f9;
+  --bg-surface: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.85);
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  
+  --neo-shadow-light: rgba(255, 255, 255, 0.95);
+  --neo-shadow-dark: rgba(148, 163, 184, 0.25);
 }
 
 .dark {
-  --bg-base: #1e1e1e;
-  --text-main: #e2e8f0;
-  --neo-out-1: #151515;
-  --neo-out-2: #272727;
-  --neo-in-1: #151515;
-  --neo-in-2: #272727;
+  /* Obsidian Charcoal Dark Mode */
+  --bg-base: #0c1017;
+  --bg-surface: #141b27;
+  --bg-card: rgba(20, 27, 39, 0.85);
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  
+  --neo-shadow-light: rgba(30, 41, 59, 0.5);
+  --neo-shadow-dark: rgba(2, 6, 23, 0.8);
 }
 
 body {
   background-color: var(--bg-base);
   color: var(--text-main);
   transition: background-color 0.3s ease, color 0.3s ease;
+  font-family: var(--font-sans);
 }
 
 @layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
   .neo-flat {
-    background: var(--bg-base);
-    box-shadow: 9px 9px 16px var(--neo-out-1), -9px -9px 16px var(--neo-out-2);
+    background: var(--bg-surface);
+    box-shadow: 8px 8px 18px var(--neo-shadow-dark), -8px -8px 18px var(--neo-shadow-light);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+  }
+
+  .dark .neo-flat {
+    border: 1px solid rgba(255, 255, 255, 0.05);
   }
   
   .neo-pressed {
     background: var(--bg-base);
-    box-shadow: inset 6px 6px 12px var(--neo-in-1), inset -6px -6px 12px var(--neo-in-2);
+    box-shadow: inset 4px 4px 8px var(--neo-shadow-dark), inset -4px -4px 8px var(--neo-shadow-light);
   }
   
   .neo-btn {
-    background: var(--bg-base);
-    box-shadow: 6px 6px 12px var(--neo-out-1), -6px -6px 12px var(--neo-out-2);
-    transition: all 0.2s ease-in-out;
+    background: var(--bg-surface);
+    box-shadow: 5px 5px 12px var(--neo-shadow-dark), -5px -5px 12px var(--neo-shadow-light);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .neo-btn:hover {
+    transform: translateY(-1px);
   }
   
   .neo-btn:active {
-    box-shadow: inset 4px 4px 8px var(--neo-in-1), inset -4px -4px 8px var(--neo-in-2);
+    box-shadow: inset 3px 3px 6px var(--neo-shadow-dark), inset -3px -3px 6px var(--neo-shadow-light);
+    transform: translateY(0px);
   }
 
   .neo-btn-green {
-    background: var(--color-gfg-green);
+    background: linear-gradient(135deg, #2f8d46 0%, #1e5e2f 100%);
     color: white;
-    box-shadow: 6px 6px 12px var(--neo-out-1), -6px -6px 12px var(--neo-out-2);
-    transition: all 0.2s ease-in-out;
+    box-shadow: 0 10px 20px -5px var(--color-gfg-glow), 4px 4px 10px var(--neo-shadow-dark);
+    transition: all 0.2s ease;
+  }
+
+  .neo-btn-green:hover {
+    box-shadow: 0 14px 24px -4px var(--color-gfg-glow), 6px 6px 14px var(--neo-shadow-dark);
+    transform: translateY(-1px);
   }
 
   .neo-btn-green:active {
-    box-shadow: inset 4px 4px 8px rgba(0,0,0,0.3), inset -4px -4px 8px rgba(255,255,255,0.2);
+    box-shadow: inset 3px 3px 6px rgba(0,0,0,0.4);
+    transform: translateY(0px);
   }
 }
+
+.custom-scrollbar::-webkit-scrollbar { width: 5px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--text-muted); opacity: 0.3; border-radius: 4px; }
+.custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #2f8d46; }
