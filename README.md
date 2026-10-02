@@ -1,36 +1,207 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🚀 GeeksforGeeks SRMIST Core Team Portal
 
-## Getting Started
+A modern, high-performance internal management and collaboration portal built exclusively for the **GeeksforGeeks Student Chapter at SRM Institute of Science and Technology (SRMIST)**.
 
-First, run the development server:
+Designed with a custom **Neo-Brutalism / Neo-Flat** UI architecture, this portal streamlines member onboarding, role hierarchy tracking, timetable coordination, profile management, and secure account management.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+---
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## ✨ Key Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 🎨 Neo-Flat / Neo-Brutalist UI
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Modern, responsive, and theme-adaptive interface.
+- Tactile soft-shadow containers.
+- Dynamic status indicators.
+- Clean and consistent typography.
+- Built using **Tailwind CSS**.
+- Fully responsive across desktop, tablet, and mobile devices.
 
-## Learn More
+### 🛡️ Secure Authentication & Access Control
 
-To learn more about Next.js, take a look at the following resources:
+- Role-based permissions for different chapter positions:
+  - `President`
+  - `Secretary`
+  - `Joint Secretary`
+  - `Domain Director`
+  - `Associate Lead`
+  - `Member`
+- Administrative account approval workflow.
+- New registrations remain in a **Pending** state until approved by authorized executives.
+- Protected routes and role-aware access control.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 🔐 Identity-Verified Password Recovery
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Secure password recovery workflow.
+- Designed to work around fragile institutional SMTP limitations.
+- Uses backend-validated identity parameters established during member onboarding.
+- Prevents unauthorized password-reset attempts through identity verification.
 
-## Deploy on Vercel
+### 📊 Comprehensive Profile & Academic Hub
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The portal maintains structured member information including:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Full name
+- SRM email address
+- SRM registration number
+- Batch
+- Department
+- Phone number
+- Faculty Advisor information
+- Personal email
+- LinkedIn profile
+- GitHub profile
+- Instagram profile
+- Chapter role
+- Domain
+- Account status
+- Profile avatar
+
+### 📅 Timetable Free-Slot Matrix
+
+Interactive timetable management system for coordinating chapter activities.
+
+- Supports **Day Orders 1–5**.
+- Members can specify their available/free periods.
+- Provides a centralized availability matrix.
+- Helps optimize:
+  - Chapter meetings
+  - Domain meetings
+  - Events
+  - Workshops
+  - Task allocation
+
+### 👑 Dynamic Chapter Hierarchy
+
+- Automatically represents the chapter's organizational hierarchy.
+- Displays reporting structures based on:
+  - Roles
+  - Domains
+  - Leadership positions
+- Helps members understand the chapter's chain of command.
+
+---
+
+# 🛠️ Tech Stack
+
+| Technology | Purpose |
+|------------|---------|
+| **Next.js** | Application framework |
+| **React** | UI development |
+| **Tailwind CSS** | Styling and responsive design |
+| **Supabase** | Backend, database, authentication and storage |
+| **PostgreSQL** | Relational database |
+| **Row Level Security (RLS)** | Database-level access control |
+| **Lucide React** | Icon library |
+| **Vercel** | Deployment platform |
+
+### Core Technologies
+
+- **Framework:** [Next.js](https://nextjs.org/) — App Router
+- **Frontend:** React
+- **Styling:** Tailwind CSS + Custom Neo-Flat CSS Utilities
+- **Backend & Database:** [Supabase](https://supabase.com/)
+- **Database:** PostgreSQL
+- **Authentication:** Supabase Auth
+- **Storage:** Supabase Storage
+- **Icons:** [Lucide React](https://lucide.dev/)
+- **Deployment:** [Vercel](https://vercel.com/)
+
+---
+
+# 🗄️ Database Architecture
+
+The application is built around three core relational Supabase tables.
+
+## 1. `profiles`
+
+Stores general member profile and chapter-related information.
+
+Typical fields include:
+
+- Full name
+- SRM email
+- Registration number
+- Department
+- Batch
+- Role
+- Domain
+- Account status
+- Avatar information
+- Social profile links
+
+---
+
+## 2. `profile_private`
+
+Stores sensitive member information that should not be exposed through the public profile layer.
+
+Includes information such as:
+
+- Phone number
+- Faculty Advisor information
+- Personal email
+- Identity verification information
+- `aadhaar_last4`
+
+> ⚠️ Sensitive information should always be protected using appropriate Supabase Row Level Security (RLS) policies and should never be exposed to unauthorized users.
+
+---
+
+## 3. `timetable_slots`
+
+Stores member timetable availability.
+
+The table maintains free-slot information mapped against:
+
+- Day Order 1
+- Day Order 2
+- Day Order 3
+- Day Order 4
+- Day Order 5
+
+This enables the portal to determine suitable time slots for chapter activities and meetings.
+
+---
+
+# 🔐 Security Architecture
+
+The application uses multiple layers of security.
+
+### Authentication
+
+Authentication is handled through **Supabase Auth**.
+
+### Authorization
+
+Access permissions are controlled through:
+
+- User roles
+- Supabase Row Level Security
+- Protected application routes
+- Backend validation
+
+# 📜 License
+
+This project is proprietary software developed for the:
+
+**GeeksforGeeks SRMIST Student Chapter**
+
+All rights reserved.
+
+Unauthorized copying, distribution, modification, or commercial use of this software is prohibited without prior permission.
+
+---
+
+# ❤️ Built For
+
+<div align="center">
+
+### GeeksforGeeks × SRMIST
+
+**GeeksforGeeks Student Chapter**  
+**SRM Institute of Science and Technology**
+
+🚀 Learn • Build • Collaborate • Grow
+
+</div>
