@@ -2,13 +2,38 @@
 
 import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Image as ImageIcon, Plus, Calendar, Tag, Trash2, Loader2, Sparkles, User, Upload, MessageCircle, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { 
+  Image as ImageIcon, 
+  Plus, 
+  Calendar, 
+  Tag, 
+  Trash2, 
+  Loader2, 
+  Sparkles, 
+  User, 
+  Upload, 
+  MessageCircle, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Bold, 
+  Italic, 
+  Underline, 
+  Code, 
+  List, 
+  Smile 
+} from "lucide-react";
+
+const QUICK_EMOJIS = ["❤️", "👍", "🔥", "🎉", "😂", "😮"];
+const ALL_EMOJIS = ["❤️", "👍", "🔥", "🎉", "😂", "😮", "👏", "🙌", "😍", "🚀", "💡", "💯", "✨", "🥳", "🙏"];
 
 export default function MemoriesPage() {
   const [profile, setProfile] = useState<any>(null);
   const [memories, setMemories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"feed" | "create">("feed");
+
+  // Emoji Picker State
+  const [openEmojiPickerId, setOpenEmojiPickerId] = useState<string | null>(null);
 
   // Create Memory Form State
   const [eventTitle, setEventTitle] = useState("");
@@ -17,9 +42,11 @@ export default function MemoriesPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Custom Modal States (Replacing browser alerts & confirms)
+  // Custom Modal States
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
     isOpen: false, message: ""
   });
@@ -32,6 +59,17 @@ export default function MemoriesPage() {
 
   useEffect(() => {
     fetchData();
+
+    // Real-time synchronization
+    const channel = supabase
+      .channel("memories_realtime_channel")
+      .on("postgres_changes", { event: "*", schema: "public", table: "memories" }, () => fetchData())
+      .on("postgres_changes", { event: "*", schema: "public", table: "memory_reactions" }, () => fetchData())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   async function fetchData() {
@@ -42,14 +80,72 @@ export default function MemoriesPage() {
     const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
     setProfile(userProfile);
 
-    const { data: memData } = await supabase
+    // 1. Fetch Memories with Member Author
+    const { data: memData, error: memError } = await supabase
       .from("memories")
       .select("*, member:profiles!memories_member_id_fkey(full_name, role, domain, avatar_path)")
       .order("created_at", { ascending: false });
 
-    setMemories(memData || []);
+    if (memError) {
+      console.error("Memories Fetch Error:", memError);
+      setLoading(false);
+      return;
+    }
+
+    // 2. Fetch Reactions safely
+    const { data: reactionsData } = await supabase.from("memory_reactions").select("*");
+
+    // Map reactions to memories
+    const combinedMemories = (memData || []).map((mem) => {
+      const memoryReactions = (reactionsData || []).filter((r) => r.memory_id === mem.id);
+      return { ...mem, memory_reactions: memoryReactions };
+    });
+
+    setMemories(combinedMemories);
     setLoading(false);
   }
+
+  // Toggle Reaction with Real-time Sync
+  async function handleToggleReaction(memoryId: string, emoji: string) {
+    if (!profile?.id) return;
+
+    setOpenEmojiPickerId(null);
+
+    const { data: existing } = await supabase
+      .from("memory_reactions")
+      .select("id")
+      .eq("memory_id", memoryId)
+      .eq("member_id", profile.id)
+      .eq("emoji", emoji)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase.from("memory_reactions").delete().eq("id", existing.id);
+    } else {
+      await supabase.from("memory_reactions").insert({
+        memory_id: memoryId,
+        member_id: profile.id,
+        emoji
+      });
+    }
+
+    fetchData();
+  }
+
+  const insertFormatting = (prefix: string, suffix: string = "") => {
+    if (!textareaRef.current) return;
+    const textarea = textareaRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = description.substring(start, end) || "text";
+    const newText = description.substring(0, start) + prefix + selectedText + suffix + description.substring(end);
+    
+    setDescription(newText);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + prefix.length, end + prefix.length);
+    }, 50);
+  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -85,6 +181,7 @@ export default function MemoriesPage() {
       }
     }
 
+    // 1. Save memory
     const { error } = await supabase.from("memories").insert({
       member_id: profile.id,
       event_title: eventTitle,
@@ -96,6 +193,14 @@ export default function MemoriesPage() {
     if (error) {
       setAlertModal({ isOpen: true, message: "Failed to share memory: " + error.message });
     } else {
+      // 2. Send Broadcast Notification to Entire Team (target_user_id = null)
+      await supabase.from("notifications").insert({
+        title: `📸 New Club Memory: ${eventTitle}`,
+        message: `${profile?.full_name || 'A team member'} posted a new story highlight! Check it out in the Memories feed.`,
+        target_user_id: null,
+        type: "notice"
+      });
+
       setEventTitle("");
       setDescription("");
       setImageFile(null);
@@ -132,7 +237,6 @@ export default function MemoriesPage() {
     }
   }
 
-  // Generate distinct chat bubble accent colors based on member ID string
   const getChatTheme = (id: string) => {
     const themes = [
       { border: "border-emerald-500/30", bg: "bg-emerald-500/5", tag: "text-emerald-500 bg-emerald-500/10" },
@@ -146,6 +250,15 @@ export default function MemoriesPage() {
       hash = id.charCodeAt(i) + ((hash << 5) - hash);
     }
     return themes[Math.abs(hash) % themes.length];
+  };
+
+  const renderFormattedText = (text: string) => {
+    if (!text) return "";
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/<u>(.*?)<\/u>/g, '<u>$1</u>')
+      .replace(/`(.*?)`/g, '<code class="bg-black/20 dark:bg-white/10 px-1 py-0.5 rounded font-mono text-[11px]">$1</code>');
   };
 
   return (
@@ -179,7 +292,7 @@ export default function MemoriesPage() {
         </div>
       </div>
 
-      {/* TAB 1: WHATSAPP-STYLE CHAT FEED */}
+      {/* TAB 1: CHAT FEED */}
       {activeTab === "feed" && (
         <div className="space-y-4 max-w-xl mx-auto">
           {loading ? (
@@ -193,9 +306,22 @@ export default function MemoriesPage() {
             memories.map((mem) => {
               const canModify = isPrivileged || mem.member_id === profile?.id;
               const theme = getChatTheme(mem.member_id || "default");
+              
+              const reactionCounts: Record<string, { count: number; reactedByMe: boolean }> = {};
+              (mem.memory_reactions || []).forEach((r: any) => {
+                if (!reactionCounts[r.emoji]) {
+                  reactionCounts[r.emoji] = { count: 0, reactedByMe: false };
+                }
+                reactionCounts[r.emoji].count += 1;
+                if (r.member_id === profile?.id) {
+                  reactionCounts[r.emoji].reactedByMe = true;
+                }
+              });
+
               return (
-                <div key={mem.id} className={`neo-flat rounded-2xl p-4 space-y-3 border ${theme.border} ${theme.bg}`}>
-                  {/* Author Header & Delete Option */}
+                <div key={mem.id} className={`neo-flat rounded-2xl p-4 space-y-3 border relative group ${theme.border} ${theme.bg}`}>
+                  
+                  {/* Author Header */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-full neo-pressed overflow-hidden flex items-center justify-center shrink-0">
@@ -213,18 +339,43 @@ export default function MemoriesPage() {
                       </div>
                     </div>
 
-                    {canModify && (
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={() => promptDeleteMemory(mem)}
-                        className="p-1.5 neo-btn rounded-lg text-rose-500 hover:scale-105 transition-all cursor-pointer"
-                        title="Delete message"
+                        onClick={() => setOpenEmojiPickerId(openEmojiPickerId === mem.id ? null : mem.id)}
+                        className="p-1.5 neo-btn rounded-lg text-amber-500 hover:scale-105 transition-all cursor-pointer"
+                        title="React with Emoji"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Smile className="w-3.5 h-3.5" />
                       </button>
-                    )}
+
+                      {canModify && (
+                        <button
+                          onClick={() => promptDeleteMemory(mem)}
+                          className="p-1.5 neo-btn rounded-lg text-rose-500 hover:scale-105 transition-all cursor-pointer"
+                          title="Delete message"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Event & Date Tag */}
+                  {/* Floating Emoji Picker */}
+                  {openEmojiPickerId === mem.id && (
+                    <div className="absolute top-12 right-4 z-30 neo-flat p-2 rounded-2xl flex items-center gap-1.5 shadow-2xl border border-white/20 animate-in zoom-in-95 bg-[var(--bg-base)]">
+                      {QUICK_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          onClick={() => handleToggleReaction(mem.id, emoji)}
+                          className="text-lg hover:scale-125 transition-transform p-1 cursor-pointer"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Event Tag */}
                   <div className="flex items-center gap-2">
                     <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md flex items-center gap-1 ${theme.tag}`}>
                       <Tag className="w-3 h-3" /> {mem.event_title}
@@ -234,7 +385,7 @@ export default function MemoriesPage() {
                     </span>
                   </div>
 
-                  {/* Native Aspect Ratio Image Attachment */}
+                  {/* Image Attachment */}
                   {mem.image_url && (
                     <div className="rounded-xl overflow-hidden neo-pressed flex justify-center bg-black/10">
                       <img 
@@ -245,8 +396,30 @@ export default function MemoriesPage() {
                     </div>
                   )}
 
-                  {/* Description Message */}
-                  <p className="text-xs leading-relaxed opacity-95 whitespace-pre-wrap">{mem.description}</p>
+                  {/* Caption */}
+                  <div 
+                    className="text-xs leading-relaxed opacity-95 whitespace-pre-wrap font-medium"
+                    dangerouslySetInnerHTML={{ __html: renderFormattedText(mem.description) }}
+                  />
+
+                  {/* Reactions Bar */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    {Object.entries(reactionCounts).map(([emoji, data]) => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleToggleReaction(mem.id, emoji)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                          data.reactedByMe 
+                            ? "neo-pressed border border-emerald-500/40 text-emerald-500 bg-emerald-500/10" 
+                            : "neo-btn opacity-80 hover:opacity-100"
+                        }`}
+                      >
+                        <span>{emoji}</span>
+                        <span className="text-[10px] font-mono">{data.count}</span>
+                      </button>
+                    ))}
+                  </div>
+
                 </div>
               );
             })
@@ -254,7 +427,7 @@ export default function MemoriesPage() {
         </div>
       )}
 
-      {/* TAB 2: POST NEW MEMORY FORM */}
+      {/* TAB 2: POST MEMORY FORM */}
       {activeTab === "create" && (
         <form onSubmit={handleCreateMemory} className="neo-flat rounded-2xl p-6 max-w-lg mx-auto space-y-4">
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
@@ -287,12 +460,59 @@ export default function MemoriesPage() {
             </div>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Caption / Story *</label>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between px-1">
+              <label className="text-[9px] font-extrabold uppercase opacity-60">Caption / Story *</label>
+              
+              <div className="flex items-center gap-1 p-1 neo-pressed rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => insertFormatting("**", "**")}
+                  className="p-1 neo-btn rounded text-[10px] font-bold hover:text-emerald-500 cursor-pointer"
+                  title="Bold"
+                >
+                  <Bold className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertFormatting("*", "*")}
+                  className="p-1 neo-btn rounded text-[10px] font-bold hover:text-emerald-500 cursor-pointer"
+                  title="Italic"
+                >
+                  <Italic className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertFormatting("<u>", "</u>")}
+                  className="p-1 neo-btn rounded text-[10px] font-bold hover:text-emerald-500 cursor-pointer"
+                  title="Underline"
+                >
+                  <Underline className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertFormatting("`", "`")}
+                  className="p-1 neo-btn rounded text-[10px] font-bold hover:text-emerald-500 cursor-pointer"
+                  title="Code block"
+                >
+                  <Code className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertFormatting("- ")}
+                  className="p-1 neo-btn rounded text-[10px] font-bold hover:text-emerald-500 cursor-pointer"
+                  title="List Item"
+                >
+                  <List className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
             <textarea
+              ref={textareaRef}
               required
-              rows={4}
-              placeholder="Write your message..."
+              rows={5}
+              placeholder="Write your story... (Use **bold**, *italic*, <u>underline</u>, or `code`)"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium custom-scrollbar resize-none"
@@ -336,13 +556,13 @@ export default function MemoriesPage() {
               disabled={submitting}
               className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex justify-center items-center gap-2 cursor-pointer"
             >
-              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Post Message"}
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Post Message & Alert Team"}
             </button>
           </div>
         </form>
       )}
 
-      {/* Custom Confirmation Dialog Modal for Deletion */}
+      {/* Delete Confirmation Modal */}
       {deleteModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
@@ -382,7 +602,7 @@ export default function MemoriesPage() {
         </div>
       )}
 
-      {/* Custom Alert Modal */}
+      {/* Alert Modal */}
       {alertModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
