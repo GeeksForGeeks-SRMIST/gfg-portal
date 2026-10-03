@@ -2,7 +2,36 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Search, Shield, Edit3, Trash2, CheckCircle2, Clock, XCircle, Loader2, Save, X, Eye, Share2, ArrowUpDown, AlertTriangle, PhoneCall } from "lucide-react";
+import { 
+  Search, 
+  Shield, 
+  Edit3, 
+  Trash2, 
+  CheckCircle2, 
+  Clock, 
+  XCircle, 
+  Loader2, 
+  Save, 
+  X, 
+  Eye, 
+  Share2, 
+  ArrowUpDown, 
+  AlertTriangle,
+  PhoneCall
+} from "lucide-react";
+
+// Safe SVG for WhatsApp to prevent import/build errors
+function WhatsAppIcon({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg 
+      className={className} 
+      fill="currentColor" 
+      viewBox="0 0 24 24"
+    >
+      <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+    </svg>
+  );
+}
 
 const EXECUTIVE_ADMINS = [
   "president",
@@ -25,7 +54,7 @@ export default function AdminHubPage() {
   const [viewingMember, setViewingMember] = useState<any>(null);
   const [editingMember, setEditingMember] = useState<any>(null);
 
-  // Edit Form State (all fields in unified profiles table)
+  // Edit Form State
   const [editFullName, setEditFullName] = useState("");
   const [editRegNumber, setEditRegNumber] = useState("");
   const [editDepartment, setEditDepartment] = useState("");
@@ -34,7 +63,6 @@ export default function AdminHubPage() {
   const [editPhone, setEditPhone] = useState("");
   const [editDomain, setEditDomain] = useState("technical");
   const [editRole, setEditRole] = useState("member");
-  const [editBatch, setEditBatch] = useState("1");
   const [editTagline, setEditTagline] = useState("");
   const [editFaName, setEditFaName] = useState("");
   const [editFaEmail, setEditFaEmail] = useState("");
@@ -76,7 +104,6 @@ export default function AdminHubPage() {
 
       setProfile(userProfile);
 
-      // Fetch all profiles cleanly from unified table
       const { data: membersData, error: membersError } = await supabase
         .from("profiles")
         .select("*")
@@ -95,6 +122,7 @@ export default function AdminHubPage() {
   }
 
   const isPrivilegedAdmin = EXECUTIVE_ADMINS.includes(profile?.role?.toLowerCase());
+  const isPresident = profile?.role?.toLowerCase() === "president";
 
   async function handleUpdateStatus(memberId: string, newStatus: "approved" | "rejected") {
     if (!isPrivilegedAdmin) {
@@ -129,7 +157,6 @@ export default function AdminHubPage() {
     setEditPhone(member.phone || "");
     setEditDomain(member.domain || "technical");
     setEditRole(member.role || "member");
-    setEditBatch(member.batch?.toString() || "1");
     setEditTagline(member.tagline || "");
     setEditFaName(member.fa_name || "");
     setEditFaEmail(member.fa_email || "");
@@ -153,7 +180,6 @@ export default function AdminHubPage() {
       phone: editPhone,
       domain: editDomain,
       role: editRole,
-      batch: parseInt(editBatch) || 1,
       tagline: editTagline,
       fa_name: editFaName,
       fa_email: editFaEmail,
@@ -180,6 +206,10 @@ export default function AdminHubPage() {
 
   async function confirmAndDeleteMember() {
     if (!deleteModal.memberId) return;
+    if (!isPresident) {
+      setAlertModal({ isOpen: true, message: "Permission denied: Only the President can permanently delete members." });
+      return;
+    }
     setIsDeleting(true);
 
     const { error } = await supabase.from("profiles").delete().eq("id", deleteModal.memberId);
@@ -194,8 +224,8 @@ export default function AdminHubPage() {
   }
 
   const promptDeleteMember = (memberId: string, name: string) => {
-    if (!isPrivilegedAdmin) {
-      setAlertModal({ isOpen: true, message: "Permission denied: Only President, Secretary, and Joint Secretary can remove members." });
+    if (!isPresident) {
+      setAlertModal({ isOpen: true, message: "Permission denied: Strictly only the President can remove members." });
       return;
     }
     setDeleteModal({ isOpen: true, memberId, name });
@@ -208,6 +238,23 @@ export default function AdminHubPage() {
       setSortField(field);
       setSortDirection("asc");
     }
+  };
+
+  // Truncates email username prior to '@': if > 6 characters, appends '...' (e.g. abcdefgh@srmist.edu.in -> abcdef...)
+  const formatEmailUsername = (emailStr: string) => {
+    if (!emailStr) return "N/A";
+    const username = emailStr.split("@")[0];
+    if (username.length > 6) {
+      return `${username.slice(0, 6)}...`;
+    }
+    return username;
+  };
+
+  const getWhatsAppUrl = (phoneStr: string) => {
+    if (!phoneStr) return null;
+    const cleanPhone = phoneStr.replace(/\D/g, "");
+    if (!cleanPhone) return null;
+    return `https://wa.me/${cleanPhone}`;
   };
 
   const filteredMembers = members.filter((m) => {
@@ -238,13 +285,18 @@ export default function AdminHubPage() {
   return (
     <div className="space-y-6">
       
-      {/* Header & Search Bar */}
+      {/* Header & Search Bar with Page Logo Icon */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-2">
-        <div>
-          <h2 className="text-xl font-extrabold text-gradient">Executive Management Hub</h2>
-          <p className="text-xs font-semibold opacity-60">
-            {isPrivilegedAdmin ? "Approve, sort, edit, and manage complete chapter team roster data." : "View team dossiers, directory info, and contact details."}
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
+            <Shield className="w-6 h-6" />
+          </div>
+          <div>
+            <h2 className="text-xl font-extrabold text-gradient">Executive Management Hub</h2>
+            <p className="text-xs font-semibold opacity-60">
+              {isPrivilegedAdmin ? "Approve, sort, edit, and manage complete chapter team roster data." : "View team dossiers, directory info, and contact details."}
+            </p>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -286,13 +338,13 @@ export default function AdminHubPage() {
                   <div className="flex items-center gap-1.5">Role / Domain <ArrowUpDown className="w-3 h-3 opacity-60" /></div>
                 </th>
                 <th className="p-4 cursor-pointer hover:text-emerald-500 transition-colors" onClick={() => handleSort("phone")}>
-                  <div className="flex items-center gap-1.5">Phone Number <ArrowUpDown className="w-3 h-3 opacity-60" /></div>
+                  <div className="flex items-center gap-1.5">Phone <ArrowUpDown className="w-3 h-3 opacity-60" /></div>
+                </th>
+                <th className="p-4">
+                  <div className="flex items-center gap-1.5">WhatsApp</div>
                 </th>
                 <th className="p-4 cursor-pointer hover:text-emerald-500 transition-colors" onClick={() => handleSort("srm_email")}>
                   <div className="flex items-center gap-1.5">Mail ID <ArrowUpDown className="w-3 h-3 opacity-60" /></div>
-                </th>
-                <th className="p-4 cursor-pointer hover:text-emerald-500 transition-colors" onClick={() => handleSort("batch")}>
-                  <div className="flex items-center gap-1.5">Batch <ArrowUpDown className="w-3 h-3 opacity-60" /></div>
                 </th>
                 <th className="p-4 cursor-pointer hover:text-emerald-500 transition-colors" onClick={() => handleSort("status")}>
                   <div className="flex items-center gap-1.5">Status <ArrowUpDown className="w-3 h-3 opacity-60" /></div>
@@ -306,115 +358,140 @@ export default function AdminHubPage() {
                   <td colSpan={7} className="p-8 text-center opacity-50">No team members found.</td>
                 </tr>
               ) : (
-                filteredMembers.map((m) => (
-                  <tr key={m.id} className="hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-                    <td className="p-4 flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full neo-pressed overflow-hidden flex items-center justify-center shrink-0">
-                        {m.avatar_path ? (
-                          <img src={m.avatar_path} alt="" className="w-full h-full object-cover" />
+                filteredMembers.map((m) => {
+                  const waUrl = getWhatsAppUrl(m.phone);
+
+                  return (
+                    <tr key={m.id} className="hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                      <td className="p-4 flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full neo-pressed overflow-hidden flex items-center justify-center shrink-0">
+                          {m.avatar_path ? (
+                            <img src={m.avatar_path} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <Shield className="w-4 h-4 opacity-40" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-bold">{m.full_name || "N/A"}</p>
+                          <p className="text-[10px] opacity-50 font-mono">{m.reg_number || "N/A"}</p>
+                        </div>
+                      </td>
+
+                      <td className="p-4">
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400 capitalize">{m.role?.replace("_", " ") || "Member"}</span>
+                        <p className="text-[10px] opacity-50 uppercase">{m.domain || "N/A"}</p>
+                      </td>
+
+                      {/* Phone Column */}
+                      <td className="p-4 font-mono">
+                        {m.phone ? (
+                          <a 
+                            href={`tel:${m.phone}`} 
+                            className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 hover:underline font-bold"
+                            title="Click to Call"
+                          >
+                            <PhoneCall className="w-3 h-3 shrink-0" />
+                            <span>{m.phone}</span>
+                          </a>
                         ) : (
-                          <Shield className="w-4 h-4 opacity-40" />
+                          <span className="opacity-40">N/A</span>
                         )}
-                      </div>
-                      <div>
-                        <p className="font-bold">{m.full_name || "N/A"}</p>
-                        <p className="text-[10px] opacity-50 font-mono">{m.reg_number || "N/A"}</p>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td className="p-4">
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400 capitalize">{m.role?.replace("_", " ") || "Member"}</span>
-                      <p className="text-[10px] opacity-50 uppercase">{m.domain || "N/A"}</p>
-                    </td>
-
-                    <td className="p-4 font-mono">
-                      {m.phone ? (
-                        <a 
-                          href={`tel:${m.phone}`} 
-                          className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 hover:underline font-bold"
-                          title="Click to Call"
-                        >
-                          <PhoneCall className="w-3 h-3" />
-                          {m.phone}
-                        </a>
-                      ) : (
-                        <span className="opacity-40">N/A</span>
-                      )}
-                    </td>
-
-                    <td className="p-4 opacity-80 truncate max-w-[180px]">{m.srm_email || "N/A"}</td>
-                    <td className="p-4 opacity-80">Batch {m.batch || "1"}</td>
-
-                    <td className="p-4">
-                      {m.status === "approved" && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-md">
-                          <CheckCircle2 className="w-3 h-3" /> Approved
-                        </span>
-                      )}
-                      {m.status === "pending" && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2 py-1 rounded-md">
-                          <Clock className="w-3 h-3 animate-pulse" /> Pending
-                        </span>
-                      )}
-                      {m.status === "rejected" && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-500 bg-rose-500/10 px-2 py-1 rounded-md">
-                          <XCircle className="w-3 h-3" /> Rejected
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="p-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                        {isPrivilegedAdmin && m.status === "pending" && (
-                          <>
-                            <button
-                              onClick={() => handleUpdateStatus(m.id, "approved")}
-                              className="px-2.5 py-1 rounded-xl neo-btn text-emerald-500 hover:scale-105 transition-all text-[10px] font-bold bg-emerald-500/10 border border-emerald-500/20 cursor-pointer"
-                              title="Approve Member"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => handleUpdateStatus(m.id, "rejected")}
-                              className="px-2.5 py-1 rounded-xl neo-btn text-rose-500 hover:scale-105 transition-all text-[10px] font-bold bg-rose-500/10 border border-rose-500/20 cursor-pointer"
-                              title="Reject Member"
-                            >
-                              Reject
-                            </button>
-                          </>
-                        )}
-
-                        <button
-                          onClick={() => setViewingMember(m)}
-                          className="px-2.5 py-1 rounded-xl neo-btn text-emerald-500 hover:scale-105 transition-all flex items-center gap-1 font-extrabold text-[10px] bg-emerald-500/10 border border-emerald-500/20 cursor-pointer"
-                          title="View Details"
-                        >
-                          <Eye className="w-3 h-3" /> View
-                        </button>
-
-                        {isPrivilegedAdmin && (
-                          <button
-                            onClick={() => handleOpenEdit(m)}
-                            className="px-2.5 py-1 rounded-xl neo-btn text-blue-500 hover:scale-105 transition-all flex items-center gap-1 font-extrabold text-[10px] bg-blue-500/10 border border-blue-500/20 cursor-pointer"
-                            title="Edit Info"
+                      {/* Separate WhatsApp Column */}
+                      <td className="p-4">
+                        {waUrl ? (
+                          <a 
+                            href={waUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="w-7 h-7 rounded-lg neo-btn text-emerald-500 hover:scale-110 transition-transform flex items-center justify-center shrink-0 bg-emerald-500/10 border border-emerald-500/20"
+                            title={`Chat with ${m.full_name} on WhatsApp`}
                           >
-                            <Edit3 className="w-3 h-3" /> Edit
-                          </button>
+                            <WhatsAppIcon className="w-3.5 h-3.5" />
+                          </a>
+                        ) : (
+                          <span className="text-[10px] opacity-40">N/A</span>
                         )}
+                      </td>
 
-                        {isPrivilegedAdmin && (
-                          <button
-                            onClick={() => promptDeleteMember(m.id, m.full_name)}
-                            className="p-1.5 rounded-xl neo-btn text-rose-500 hover:scale-105 transition-all bg-rose-500/10 border border-rose-500/20 cursor-pointer"
-                            title="Remove"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                      {/* Truncated Mail ID Column */}
+                      <td className="p-4 font-mono font-bold opacity-80" title={m.srm_email}>
+                        {formatEmailUsername(m.srm_email)}
+                      </td>
+
+                      <td className="p-4">
+                        {m.status === "approved" && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-md">
+                            <CheckCircle2 className="w-3 h-3" /> Approved
+                          </span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                        {m.status === "pending" && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2 py-1 rounded-md">
+                            <Clock className="w-3 h-3 animate-pulse" /> Pending
+                          </span>
+                        )}
+                        {m.status === "rejected" && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-500 bg-rose-500/10 px-2 py-1 rounded-md">
+                            <XCircle className="w-3 h-3" /> Rejected
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          {isPrivilegedAdmin && m.status === "pending" && (
+                            <>
+                              <button
+                                onClick={() => handleUpdateStatus(m.id, "approved")}
+                                className="px-2.5 py-1 rounded-xl neo-btn text-emerald-500 hover:scale-105 transition-all text-[10px] font-bold bg-emerald-500/10 border border-emerald-500/20 cursor-pointer"
+                                title="Approve Member"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => handleUpdateStatus(m.id, "rejected")}
+                                className="px-2.5 py-1 rounded-xl neo-btn text-rose-500 hover:scale-105 transition-all text-[10px] font-bold bg-rose-500/10 border border-rose-500/20 cursor-pointer"
+                                title="Reject Member"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+
+                          <button
+                            onClick={() => setViewingMember(m)}
+                            className="px-2.5 py-1 rounded-xl neo-btn text-emerald-500 hover:scale-105 transition-all flex items-center gap-1 font-extrabold text-[10px] bg-emerald-500/10 border border-emerald-500/20 cursor-pointer"
+                            title="View Details"
+                          >
+                            <Eye className="w-3 h-3" /> View
+                          </button>
+
+                          {isPrivilegedAdmin && (
+                            <button
+                              onClick={() => handleOpenEdit(m)}
+                              className="px-2.5 py-1 rounded-xl neo-btn text-blue-500 hover:scale-105 transition-all flex items-center gap-1 font-extrabold text-[10px] bg-blue-500/10 border border-blue-500/20 cursor-pointer"
+                              title="Edit Info"
+                            >
+                              <Edit3 className="w-3 h-3" /> Edit
+                            </button>
+                          )}
+
+                          {/* Strictly President Only Delete Feature */}
+                          {isPresident && (
+                            <button
+                              onClick={() => promptDeleteMember(m.id, m.full_name)}
+                              className="p-1.5 rounded-xl neo-btn text-rose-500 hover:scale-105 transition-all bg-rose-500/10 border border-rose-500/20 cursor-pointer"
+                              title="Remove Member (President Only)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -467,18 +544,27 @@ export default function AdminHubPage() {
                   <p className="font-semibold">{viewingMember.department || "N/A"}</p>
                 </div>
                 <div className="neo-pressed rounded-xl p-3 space-y-1">
-                  <span className="text-[9px] font-bold uppercase tracking-widest opacity-45">Phone Number</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest opacity-45">Phone / WhatsApp</span>
                   {viewingMember.phone ? (
-                    <a href={`tel:${viewingMember.phone}`} className="font-semibold text-emerald-500 hover:underline flex items-center gap-1">
-                      <PhoneCall className="w-3 h-3" /> {viewingMember.phone}
-                    </a>
+                    <div className="flex items-center gap-3 pt-0.5">
+                      <a href={`tel:${viewingMember.phone}`} className="font-semibold text-emerald-500 hover:underline flex items-center gap-1">
+                        <PhoneCall className="w-3 h-3" /> {viewingMember.phone}
+                      </a>
+                      {getWhatsAppUrl(viewingMember.phone) && (
+                        <a 
+                          href={getWhatsAppUrl(viewingMember.phone)!} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-emerald-500 hover:scale-110 transition-transform"
+                          title="WhatsApp Chat"
+                        >
+                          <WhatsAppIcon className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                    </div>
                   ) : (
                     <p className="font-semibold opacity-40">N/A</p>
                   )}
-                </div>
-                <div className="neo-pressed rounded-xl p-3 space-y-1">
-                  <span className="text-[9px] font-bold uppercase tracking-widest opacity-45">Batch</span>
-                  <p className="font-semibold">Batch {viewingMember.batch || "1"}</p>
                 </div>
               </div>
             </div>
@@ -606,7 +692,7 @@ export default function AdminHubPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Domain *</label>
                   <select
@@ -633,17 +719,6 @@ export default function AdminHubPage() {
                     <option value="domain_director" className="bg-[var(--bg-surface)]">Domain Director</option>
                     <option value="associate_lead" className="bg-[var(--bg-surface)]">Associate Lead</option>
                     <option value="member" className="bg-[var(--bg-surface)]">Member</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Batch *</label>
-                  <select
-                    value={editBatch}
-                    onChange={(e) => setEditBatch(e.target.value)}
-                    className="w-full px-3 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-medium cursor-pointer"
-                  >
-                    <option value="1" className="bg-[var(--bg-surface)]">Batch 1</option>
-                    <option value="2" className="bg-[var(--bg-surface)]">Batch 2</option>
                   </select>
                 </div>
               </div>
@@ -747,8 +822,8 @@ export default function AdminHubPage() {
         </div>
       )}
 
-      {/* Custom Deletion Modal */}
-      {deleteModal.isOpen && (
+      {/* Custom Deletion Modal (President Only) */}
+      {deleteModal.isOpen && isPresident && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
             <div className="flex items-center gap-3 text-rose-500">
