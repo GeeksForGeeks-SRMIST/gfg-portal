@@ -20,7 +20,8 @@ import {
   Bell,
   Image as ImageIcon,
   Menu,
-  X
+  X,
+  Users
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { NotificationBell } from "@/components/NotificationBell";
@@ -49,7 +50,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     loadUser();
   }, [router, supabase]);
 
-  // Close mobile menu on route change
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
@@ -95,8 +95,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <h2 className="font-black tracking-tight text-xs text-gradient leading-tight truncate">
                 GeeksforGeeks
               </h2>
-              <p className="text-[10px] font-extrabold text-[var(--text-muted)] uppercase tracking-wider truncate">
-                SRMIST • CORE TEAM
+              <p className="text-[10px] text-[var(--text-muted)] tracking-wider truncate">
+                <strong className="font-black text-[var(--text-main)]">GFG SRMIST</strong> • CORE TEAM
               </p>
             </div>
           </div>
@@ -124,8 +124,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {isLeadOrDirector && (
               <NavLink href="/dashboard/complaints" icon={<AlertOctagon size={16} strokeWidth={2.5} />} label="Complaints" currentPath={pathname} />
             )}
-            {isExecutiveLead && (
+
+            {/* Dynamic Team Link: Manage Team for Leads, Explore Team for Members */}
+            {isExecutiveLead ? (
               <NavLink href="/dashboard/admin" icon={<Shield size={16} strokeWidth={2.5} />} label="Manage Team" currentPath={pathname} />
+            ) : (
+              <NavLink href="/dashboard/admin" icon={<Users size={16} strokeWidth={2.5} />} label="Explore Team" currentPath={pathname} />
             )}
 
             <div className="pt-3 pb-1 px-2 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest">
@@ -176,7 +180,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   </div>
                   <div>
                     <h2 className="font-black tracking-tight text-xs text-gradient">GeeksforGeeks</h2>
-                    <p className="text-[9px] font-extrabold opacity-60 uppercase">SRMIST • CORE</p>
+                    <p className="text-[9px] text-[var(--text-muted)] tracking-wider">
+                      <strong className="font-black text-[var(--text-main)]">GFG SRMIST</strong> • CORE
+                    </p>
                   </div>
                 </div>
                 <button 
@@ -210,8 +216,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {isLeadOrDirector && (
                   <NavLink href="/dashboard/complaints" icon={<AlertOctagon size={16} strokeWidth={2.5} />} label="Complaints" currentPath={pathname} />
                 )}
-                {isExecutiveLead && (
+
+                {isExecutiveLead ? (
                   <NavLink href="/dashboard/admin" icon={<Shield size={16} strokeWidth={2.5} />} label="Manage Team" currentPath={pathname} />
+                ) : (
+                  <NavLink href="/dashboard/admin" icon={<Users size={16} strokeWidth={2.5} />} label="Explore Team" currentPath={pathname} />
                 )}
 
                 <div className="pt-3 pb-1 px-2 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest">
@@ -254,10 +263,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Main Viewport */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         
-        {/* Sticky Header with Mobile Menu Button */}
+        {/* Header Bar */}
         <header className="h-16 px-4 md:px-8 flex items-center justify-between shrink-0 bg-[var(--bg-base)] border-b border-[var(--text-muted)]/10 z-20">
           <div className="flex items-center gap-2.5 md:gap-3">
-            {/* Mobile Menu Toggle Button */}
             <button
               onClick={() => setMobileMenuOpen(true)}
               className="flex md:hidden p-2.5 rounded-xl neo-btn text-emerald-500 items-center justify-center shrink-0 cursor-pointer"
@@ -266,21 +274,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <Menu size={20} strokeWidth={2.5} />
             </button>
 
-            <span className="text-xs sm:text-sm md:text-lg font-black tracking-widest text-[var(--text-main)] uppercase truncate">
-              GFG SRMIST
+            <span className="text-xs sm:text-sm md:text-lg tracking-widest text-[var(--text-main)] uppercase truncate">
+              <strong className="font-black">GFG SRMIST</strong>
             </span>
             <span className="hidden sm:inline-block text-xs px-3 py-1 rounded-full neo-pressed text-emerald-600 dark:text-emerald-400 font-black tracking-widest uppercase border border-emerald-500/20">
               CORE TEAM
             </span>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             <NotificationBell />
             <ThemeToggle />
           </div>
         </header>
 
-        {/* Scrollable Main Content Pane */}
+        {/* Scrollable Content Viewport */}
         <main className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8">
           <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
             {children}

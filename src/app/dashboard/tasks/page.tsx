@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { 
   CheckSquare, 
@@ -19,7 +19,12 @@ import {
   Globe,
   Hand,
   User,
-  Users
+  Users,
+  Bold,
+  Italic,
+  List,
+  Code,
+  Link as LinkIcon
 } from "lucide-react";
 
 export default function TasksPage() {
@@ -64,7 +69,8 @@ export default function TasksPage() {
   const [taskType, setTaskType] = useState<"direct" | "floating">("direct");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDesc, setTaskDesc] = useState("");
-  const [taskAssignee, setTaskAssignee] = useState("");
+  const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
+  const [maxClaims, setMaxClaims] = useState<number>(3);
   const [taskPoints, setTaskPoints] = useState(10);
   const [taskDeadline, setTaskDeadline] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
@@ -91,6 +97,7 @@ export default function TasksPage() {
     isOpen: false, message: ""
   });
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
 
   useEffect(() => {
@@ -171,12 +178,69 @@ export default function TasksPage() {
     return members.filter(m => m.domain?.toLowerCase() === domain.toLowerCase());
   };
 
+  const applyFormatting = (formatType: "bold" | "italic" | "list" | "code" | "link") => {
+    if (!textareaRef.current) return;
+    const input = textareaRef.current;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const selectedText = taskDesc.substring(start, end);
+
+    let formatted = "";
+    switch (formatType) {
+      case "bold":
+        formatted = `**${selectedText || "bold text"}**`;
+        break;
+      case "italic":
+        formatted = `*${selectedText || "italic text"}*`;
+        break;
+      case "list":
+        formatted = `\n- ${selectedText || "list item"}`;
+        break;
+      case "code":
+        formatted = `\`${selectedText || "code"}\``;
+        break;
+      case "link":
+        formatted = `[${selectedText || "link title"}](https://)`;
+        break;
+    }
+
+    const newText = taskDesc.substring(0, start) + formatted + taskDesc.substring(end);
+    setTaskDesc(newText);
+  };
+
+  const toggleAssignee = (memberId: string) => {
+    setSelectedAssignees((prev) =>
+      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
+    );
+  };
+
   async function handleClaimTask(taskId: string) {
     setClaimingTaskId(taskId);
-    const { error } = await supabase
+    
+    // Check current claims for floating task
+    const { count } = await supabase
       .from("tasks")
-      .update({ assigned_to: profile.id })
-      .eq("id", taskId);
+      .select("*", { count: "exact", head: true })
+      .eq("parent_task_id", taskId);
+
+    const parentTask = tasks.find(t => t.id === taskId);
+    if (parentTask?.max_claims && (count || 0) >= parentTask.max_claims) {
+      setAlertModal({ isOpen: true, message: "Claim limit reached for this floating task." });
+      setClaimingTaskId(null);
+      return;
+    }
+
+    // Create claimed task instance for individual user
+    const { error } = await supabase.from("tasks").insert({
+      title: parentTask.title,
+      description: parentTask.description,
+      assigned_to: profile.id,
+      assigned_by: parentTask.assigned_by,
+      points: parentTask.points,
+      deadline: parentTask.deadline,
+      status: "pending",
+      parent_task_id: taskId
+    });
 
     if (error) {
       setAlertModal({ isOpen: true, message: "Failed to claim task: " + error.message });
@@ -275,47 +339,65 @@ export default function TasksPage() {
   async function handleCreateTask(e: React.FormEvent) {
     e.preventDefault();
     if (!taskTitle || !taskDeadline) return;
-    if (taskType === "direct" && !taskAssignee) {
-      setAlertModal({ isOpen: true, message: "Please select an assignee member for direct assignment." });
+    
+    if (taskType === "direct" && selectedAssignees.length === 0) {
+      setAlertModal({ isOpen: true, message: "Please select at least one assignee for direct assignment." });
       return;
     }
 
     setCreatingTask(true);
 
-    const targetMember = members.find(m => m.id === taskAssignee);
-    if (taskType === "direct" && targetMember && !canReviewSubmission(profile.role, targetMember.role)) {
-      setAlertModal({ isOpen: true, message: `Hierarchy Restriction: You cannot assign tasks to a member with an equal or higher rank (${targetMember.role}).` });
-      setCreatingTask(false);
-      return;
-    }
+    if (taskType === "direct") {
+      // Create individual direct task for each selected member
+      const taskInserts = selectedAssignees.map((assigneeId) => ({
+        title: taskTitle,
+        description: taskDesc,
+        assigned_to: assigneeId,
+        assigned_by: profile.id,
+        points: taskPoints || 10,
+        deadline: taskDeadline,
+        status: "pending"
+      }));
 
-    const { error } = await supabase.from("tasks").insert({
-      title: taskTitle,
-      description: taskDesc,
-      assigned_to: taskType === "floating" ? null : taskAssignee,
-      assigned_by: profile.id,
-      points: taskPoints || 10,
-      deadline: taskDeadline,
-      status: "pending"
-    });
+      const { error } = await supabase.from("tasks").insert(taskInserts);
 
-    if (error) {
-      setAlertModal({ isOpen: true, message: "Error creating task: " + error.message });
-      setCreatingTask(false);
-      return;
-    }
+      if (error) {
+        setAlertModal({ isOpen: true, message: "Error creating tasks: " + error.message });
+        setCreatingTask(false);
+        return;
+      }
 
-    if (taskType === "direct" && taskAssignee) {
-      await supabase.from("notifications").insert({
-        title: `📋 New Task Assigned: ${taskTitle}`,
-        message: `You were assigned a deliverable worth ${taskPoints} PTS by ${profile?.full_name}.`,
-        target_user_id: taskAssignee,
-        type: "task"
-      });
+      // Notify selected members
+      for (const assigneeId of selectedAssignees) {
+        await supabase.from("notifications").insert({
+          title: `📋 New Task Assigned: ${taskTitle}`,
+          message: `You were assigned a deliverable worth ${taskPoints} PTS by ${profile?.full_name}.`,
+          target_user_id: assigneeId,
+          type: "task"
+        });
+      }
     } else {
+      // Create Floating Task with Max Claims limit
+      const { error } = await supabase.from("tasks").insert({
+        title: taskTitle,
+        description: taskDesc,
+        assigned_to: null,
+        assigned_by: profile.id,
+        points: taskPoints || 10,
+        deadline: taskDeadline,
+        status: "pending",
+        max_claims: maxClaims || 3
+      });
+
+      if (error) {
+        setAlertModal({ isOpen: true, message: "Error creating floating task: " + error.message });
+        setCreatingTask(false);
+        return;
+      }
+
       await supabase.from("notifications").insert({
         title: `🌐 New Floating Task Available: ${taskTitle}`,
-        message: `An open deliverable worth ${taskPoints} PTS was created. Anyone can claim it now!`,
+        message: `An open deliverable worth ${taskPoints} PTS was created (Max ${maxClaims} claims). Claim yours now!`,
         target_user_id: null,
         type: "notice"
       });
@@ -323,7 +405,8 @@ export default function TasksPage() {
 
     setTaskTitle("");
     setTaskDesc("");
-    setTaskAssignee("");
+    setSelectedAssignees([]);
+    setMaxClaims(3);
     setTaskPoints(10);
     setTaskDeadline("");
     setCreatingTask(false);
@@ -466,7 +549,7 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* 2. Navigation Tab Buttons (Placed neatly below the heading line) */}
+      {/* 2. Navigation Tab Buttons */}
       <div className="flex flex-wrap gap-2 pt-1 border-b border-[var(--text-muted)]/10 pb-4 px-2">
         <button
           onClick={() => setActiveTab("assigned")}
@@ -524,11 +607,11 @@ export default function TasksPage() {
         )}
       </div>
 
-      {/* TAB 1: Tasks Feed (With Sub-Filter for Leads to separate My Tasks vs Other Assigned Tasks) */}
+      {/* TAB 1: Tasks Feed */}
       {activeTab === "assigned" && (
         <div className="space-y-4">
           
-          {/* Sub-Switch for Executive Leads to differentiate My Direct Tasks vs Other Assigned Tasks */}
+          {/* Sub-Switch for Executive Leads */}
           {isLead && (
             <div className="flex items-center gap-2 p-1.5 neo-pressed rounded-2xl max-w-md">
               <button
@@ -565,6 +648,9 @@ export default function TasksPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {currentDisplayTasks.map((task) => {
                 const isFloating = task.assigned_to === null;
+                const claimedCount = tasks.filter(t => t.parent_task_id === task.id).length;
+                const maxAllowed = task.max_claims || 3;
+                const isFullyClaimed = isFloating && claimedCount >= maxAllowed;
 
                 return (
                   <div
@@ -579,7 +665,7 @@ export default function TasksPage() {
                       <div className="flex items-center justify-between gap-2">
                         {isFloating ? (
                           <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-teal-500/10 text-teal-400 border-teal-500/30 flex items-center gap-1">
-                            <Globe className="w-2.5 h-2.5" /> Floating Task
+                            <Globe className="w-2.5 h-2.5" /> Floating ({claimedCount}/{maxAllowed} Claimed)
                           </span>
                         ) : (
                           <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-amber-500/10 text-amber-500 border-amber-500/20">
@@ -592,7 +678,7 @@ export default function TasksPage() {
                       </div>
 
                       <h3 className="text-sm font-bold pt-1">{task.title}</h3>
-                      <p className="text-xs opacity-70 leading-relaxed line-clamp-3">{task.description}</p>
+                      <p className="text-xs opacity-70 leading-relaxed whitespace-pre-wrap line-clamp-4">{task.description}</p>
                     </div>
 
                     <div className="space-y-2.5 pt-3 border-t border-[var(--text-muted)]/10">
@@ -604,7 +690,7 @@ export default function TasksPage() {
                       <div className="flex items-center justify-between text-[10px] font-bold">
                         <span className="opacity-50">Assigned To:</span>
                         <span className={isFloating ? "text-teal-400 font-extrabold" : "text-emerald-500"}>
-                          {isFloating ? "Anyone (Floating)" : task.assigned_member?.full_name}
+                          {isFloating ? "Floating Task" : task.assigned_member?.full_name}
                         </span>
                       </div>
 
@@ -617,10 +703,20 @@ export default function TasksPage() {
                       {isFloating && (
                         <button
                           onClick={() => handleClaimTask(task.id)}
-                          disabled={claimingTaskId === task.id}
-                          className="w-full py-2.5 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2 cursor-pointer shadow-lg"
+                          disabled={claimingTaskId === task.id || isFullyClaimed}
+                          className={`w-full py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2 transition-all cursor-pointer shadow-lg ${
+                            isFullyClaimed
+                              ? "bg-gray-500/20 text-gray-400 cursor-not-allowed"
+                              : "neo-btn-green"
+                          }`}
                         >
-                          {claimingTaskId === task.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Hand className="w-3.5 h-3.5" /> Claim Task</>}
+                          {claimingTaskId === task.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : isFullyClaimed ? (
+                            "Claim Limit Reached"
+                          ) : (
+                            <><Hand className="w-3.5 h-3.5" /> Claim Task ({claimedCount}/{maxAllowed})</>
+                          )}
                         </button>
                       )}
 
@@ -839,12 +935,13 @@ export default function TasksPage() {
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
           />
 
+          {/* Multi-Member Assignee Selection for Direct Tasks */}
           {taskType === "direct" && (
             <div className="space-y-2 border-l-2 border-emerald-500/40 pl-3">
               <label className="text-[9px] font-extrabold uppercase opacity-60">1. Filter Domain</label>
               <select
                 value={taskDomainFilter}
-                onChange={(e) => { setTaskDomainFilter(e.target.value); setTaskAssignee(""); }}
+                onChange={(e) => { setTaskDomainFilter(e.target.value); setSelectedAssignees([]); }}
                 className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-bold cursor-pointer"
               >
                 <option value="all" className="bg-[var(--bg-surface)]">All Domains</option>
@@ -854,20 +951,41 @@ export default function TasksPage() {
                 <option value="executive" className="bg-[var(--bg-surface)]">Executive</option>
               </select>
 
-              <label className="text-[9px] font-extrabold uppercase opacity-60 pt-1 block">2. Select Member</label>
-              <select
-                required
-                value={taskAssignee}
-                onChange={(e) => setTaskAssignee(e.target.value)}
-                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
-              >
-                <option value="" className="bg-[var(--bg-surface)]">-- Select Assignee ({filterMembersByDomain(taskDomainFilter).length} available) --</option>
-                {filterMembersByDomain(taskDomainFilter).map(m => (
-                  <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
-                    {m.full_name} ({m.domain} - {m.role})
-                  </option>
+              <label className="text-[9px] font-extrabold uppercase opacity-60 pt-1 block">
+                2. Select Assignees ({selectedAssignees.length} selected)
+              </label>
+              <div className="max-h-40 overflow-y-auto neo-pressed rounded-xl p-2 space-y-1 custom-scrollbar">
+                {filterMembersByDomain(taskDomainFilter).map((m) => (
+                  <label
+                    key={m.id}
+                    className="flex items-center justify-between p-2 rounded-lg hover:bg-emerald-500/10 cursor-pointer text-xs font-medium transition-colors"
+                  >
+                    <span>{m.full_name} <span className="opacity-50 text-[10px]">({m.domain})</span></span>
+                    <input
+                      type="checkbox"
+                      checked={selectedAssignees.includes(m.id)}
+                      onChange={() => toggleAssignee(m.id)}
+                      className="accent-emerald-500 w-4 h-4 cursor-pointer"
+                    />
+                  </label>
                 ))}
-              </select>
+              </div>
+            </div>
+          )}
+
+          {/* Floating Task Limit */}
+          {taskType === "floating" && (
+            <div className="space-y-1">
+              <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Max Claim Limit (Capacity)</label>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                required
+                value={maxClaims}
+                onChange={(e) => setMaxClaims(parseInt(e.target.value) || 1)}
+                className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-teal-400 font-bold text-teal-400"
+              />
             </div>
           )}
 
@@ -900,16 +1018,63 @@ export default function TasksPage() {
             </div>
           </div>
 
-          <textarea
-            placeholder="Task requirements, Drive links, or instructions..."
-            rows={4}
-            value={taskDesc}
-            onChange={(e) => setTaskDesc(e.target.value)}
-            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium custom-scrollbar resize-none"
-          />
+          {/* Text Formatting Toolbar */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5 p-1.5 neo-pressed rounded-xl border border-white/5">
+              <button
+                type="button"
+                onClick={() => applyFormatting("bold")}
+                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
+                title="Bold"
+              >
+                <Bold className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => applyFormatting("italic")}
+                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
+                title="Italic"
+              >
+                <Italic className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => applyFormatting("list")}
+                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
+                title="List"
+              >
+                <List className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => applyFormatting("code")}
+                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
+                title="Code"
+              >
+                <Code className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => applyFormatting("link")}
+                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
+                title="Link"
+              >
+                <LinkIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <textarea
+              ref={textareaRef}
+              placeholder="Task requirements, Drive links, or formatted instructions..."
+              rows={4}
+              value={taskDesc}
+              onChange={(e) => setTaskDesc(e.target.value)}
+              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium custom-scrollbar resize-none"
+            />
+          </div>
 
           <button type="submit" disabled={creatingTask} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer">
-            {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckSquare className="w-4 h-4" /> {taskType === "floating" ? "Publish Floating Task" : "Assign Task & Send Alert"}</>}
+            {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckSquare className="w-4 h-4" /> {taskType === "floating" ? `Publish Floating Task (${maxClaims} Claims)` : `Assign Task to ${selectedAssignees.length} Member(s)`}</>}
           </button>
         </form>
       )}

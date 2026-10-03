@@ -1,49 +1,44 @@
 "use client";
 
+import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { Sun, Moon } from "lucide-react";
 
 export function ThemeToggle() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // Check initial theme from DOM or localStorage
-    const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    
-    const isDark = savedTheme === "dark" || (!savedTheme && prefersDark);
-    setIsDarkMode(isDark);
-
-    if (isDark) {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
+    setMounted(true);
   }, []);
 
-  const toggleTheme = () => {
-    const nextDark = !isDarkMode;
-    setIsDarkMode(nextDark);
+  if (!mounted) {
+    return (
+      <div className="w-9 h-9 rounded-xl neo-pressed opacity-50 shrink-0" />
+    );
+  }
 
-    if (nextDark) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
+  const isDark = resolvedTheme === "dark";
+
+  const handleToggle = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const nextTheme = isDark ? "light" : "dark";
+    setTheme(nextTheme);
   };
 
   return (
     <button
-      onClick={toggleTheme}
-      className="p-2.5 neo-btn rounded-xl text-[var(--text-main)] hover:text-emerald-500 transition-colors flex items-center justify-center"
-      title="Toggle Light/Dark Theme"
+      type="button"
+      onClick={handleToggle}
+      className="p-2 rounded-xl neo-btn text-[var(--text-main)] hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer shrink-0 border border-white/10 flex items-center justify-center relative z-50 pointer-events-auto"
+      aria-label={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+      title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
     >
-      {isDarkMode ? (
-        <Sun className="w-4 h-4 text-amber-400" />
+      {isDark ? (
+        <Sun className="w-4 h-4 text-amber-400 pointer-events-none" />
       ) : (
-        <Moon className="w-4 h-4 text-emerald-600" />
+        <Moon className="w-4 h-4 text-indigo-500 pointer-events-none" />
       )}
     </button>
   );

@@ -20,16 +20,43 @@ import {
   Plus,
   Loader2,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Sun,
+  Sunrise,
+  Sunset,
+  Moon,
+  Stars,
+  Layers,
+  Crown
 } from "lucide-react";
 import Link from "next/link";
+
+interface TimePhase {
+  greeting: string;
+  badge: string;
+  icon: React.ReactNode;
+  gradientStyle: React.CSSProperties;
+  nameColorClass: string;
+  badgeContainerStyle: string;
+  buttonStyle: string;
+}
 
 export default function DashboardOverview() {
   const [profile, setProfile] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState("");
   const [currentDate, setCurrentDate] = useState("");
-  const [greeting, setGreeting] = useState("Welcome back");
-  
+  const [timePhase, setTimePhase] = useState<TimePhase>({
+    greeting: "Good Morning",
+    badge: "Morning Zenith",
+    icon: <Sun className="w-3.5 h-3.5 text-amber-500" />,
+    gradientStyle: {
+      background: "linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(16, 185, 129, 0.18) 50%, rgba(20, 184, 166, 0.12) 100%)"
+    },
+    nameColorClass: "from-amber-500 via-emerald-500 to-teal-500",
+    badgeContainerStyle: "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400",
+    buttonStyle: "bg-emerald-600 hover:bg-emerald-700 text-white"
+  });
+
   // Real-time Data States
   const [notices, setNotices] = useState<any[]>([]);
   const [myTasks, setMyTasks] = useState<any[]>([]);
@@ -50,7 +77,7 @@ export default function DashboardOverview() {
   const [eventLocation, setEventLocation] = useState("");
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
 
-  // Custom Professional Confirmation Dialog State
+  // Custom Confirmation Modal State
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ isOpen: boolean; eventId: string | null; title: string }>({
     isOpen: false,
     eventId: null,
@@ -61,20 +88,91 @@ export default function DashboardOverview() {
   const supabase = createClient();
 
   useEffect(() => {
-    const updateTimeAndGreeting = () => {
+    const updateClockAndPhase = () => {
       const now = new Date();
       const hours = now.getHours();
       
       setCurrentTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setCurrentDate(now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }));
 
-      if (hours < 12) setGreeting("Good morning");
-      else if (hours < 17) setGreeting("Good afternoon");
-      else setGreeting("Good evening");
+      // Dynamic Time-Aware Color Harmonization Engine
+      if (hours >= 5 && hours < 7) {
+        setTimePhase({
+          greeting: "Good Dawn",
+          badge: "Dawn Glow",
+          icon: <Sunrise className="w-3.5 h-3.5 text-rose-500" />,
+          gradientStyle: {
+            background: "linear-gradient(135deg, rgba(244, 63, 94, 0.22) 0%, rgba(245, 158, 11, 0.18) 50%, rgba(249, 115, 22, 0.12) 100%)"
+          },
+          nameColorClass: "from-rose-500 via-amber-500 to-orange-500",
+          badgeContainerStyle: "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400",
+          buttonStyle: "bg-rose-600 hover:bg-rose-700 text-white"
+        });
+      } else if (hours >= 7 && hours < 12) {
+        setTimePhase({
+          greeting: "Good Morning",
+          badge: "Morning Zenith",
+          icon: <Sun className="w-3.5 h-3.5 text-amber-500" />,
+          gradientStyle: {
+            background: "linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(16, 185, 129, 0.18) 50%, rgba(20, 184, 166, 0.12) 100%)"
+          },
+          nameColorClass: "from-emerald-600 via-teal-500 to-amber-500 dark:from-emerald-400 dark:via-teal-300 dark:to-amber-300",
+          badgeContainerStyle: "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400",
+          buttonStyle: "bg-emerald-600 hover:bg-emerald-700 text-white"
+        });
+      } else if (hours >= 12 && hours < 17) {
+        setTimePhase({
+          greeting: "Good Afternoon",
+          badge: "Solar Peak",
+          icon: <Sun className="w-3.5 h-3.5 text-amber-400" />,
+          gradientStyle: {
+            background: "linear-gradient(135deg, rgba(14, 165, 233, 0.22) 0%, rgba(245, 158, 11, 0.18) 50%, rgba(16, 185, 129, 0.12) 100%)"
+          },
+          nameColorClass: "from-sky-500 via-amber-500 to-emerald-500",
+          badgeContainerStyle: "bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400",
+          buttonStyle: "bg-sky-600 hover:bg-sky-700 text-white"
+        });
+      } else if (hours >= 17 && hours < 19) {
+        setTimePhase({
+          greeting: "Good Evening",
+          badge: "Evening Twilight",
+          icon: <Sunset className="w-3.5 h-3.5 text-orange-500" />,
+          gradientStyle: {
+            background: "linear-gradient(135deg, rgba(249, 115, 22, 0.25) 0%, rgba(244, 63, 94, 0.20) 50%, rgba(168, 85, 247, 0.15) 100%)"
+          },
+          nameColorClass: "from-orange-500 via-rose-500 to-purple-500",
+          badgeContainerStyle: "bg-orange-500/10 border-orange-500/30 text-orange-600 dark:text-orange-400",
+          buttonStyle: "bg-orange-600 hover:bg-orange-700 text-white"
+        });
+      } else if (hours >= 19 && hours < 21) {
+        setTimePhase({
+          greeting: "Good Twilight",
+          badge: "Dusk Twilight",
+          icon: <Stars className="w-3.5 h-3.5 text-indigo-400" />,
+          gradientStyle: {
+            background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(168, 85, 247, 0.20) 50%, rgba(244, 63, 94, 0.15) 100%)"
+          },
+          nameColorClass: "from-indigo-500 via-purple-500 to-pink-500 dark:from-indigo-300 dark:via-purple-300 dark:to-pink-300",
+          badgeContainerStyle: "bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400",
+          buttonStyle: "bg-indigo-600 hover:bg-indigo-700 text-white"
+        });
+      } else {
+        setTimePhase({
+          greeting: "Good Night",
+          badge: "Night Starlight",
+          icon: <Moon className="w-3.5 h-3.5 text-purple-400" />,
+          gradientStyle: {
+            background: "linear-gradient(135deg, rgba(99, 102, 241, 0.28) 0%, rgba(139, 92, 246, 0.22) 50%, rgba(236, 72, 153, 0.15) 100%)"
+          },
+          nameColorClass: "from-purple-500 via-indigo-400 to-pink-500 dark:from-purple-300 dark:via-indigo-200 dark:to-pink-300",
+          badgeContainerStyle: "bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-300",
+          buttonStyle: "bg-purple-600 hover:bg-purple-700 text-white"
+        });
+      }
     };
 
-    updateTimeAndGreeting();
-    const timer = setInterval(updateTimeAndGreeting, 1000);
+    updateClockAndPhase();
+    const timer = setInterval(updateClockAndPhase, 1000);
 
     fetchDashboardData();
 
@@ -143,7 +241,13 @@ export default function DashboardOverview() {
     setTopLeaderboard(rankedList);
     setMyPoints(pointsMap[user.id] || 0);
 
-    const { data: confessionData } = await supabase.from("confessions").select("*").eq("status", "approved").order("created_at", { ascending: false }).limit(1).single();
+    const { data: confessionData } = await supabase
+      .from("confessions")
+      .select("*")
+      .eq("status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     setLatestConfession(confessionData);
 
     const { count: pendingCount } = await supabase.from("profiles").select("*", { count: "exact", head: true }).eq("status", "pending");
@@ -190,53 +294,84 @@ export default function DashboardOverview() {
   }
 
   if (!profile) {
-    return <div className="h-40 w-full neo-flat rounded-2xl animate-pulse" />;
+    return <div className="h-36 w-full neo-flat rounded-2xl animate-pulse" />;
   }
 
   const role = profile.role || "member";
   const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(role);
 
-  const formatDesignation = (rawRole: string, domain?: string) => {
+  const formatRoleTitle = (rawRole: string) => {
     const roleMap: Record<string, string> = {
       president: "President",
       secretary: "Secretary",
       joint_secretary: "Joint Secretary",
-      domain_director: `${domain ? domain.charAt(0).toUpperCase() + domain.slice(1) : ""} Director`,
-      associate_lead: `${domain ? domain.charAt(0).toUpperCase() + domain.slice(1) : ""} Associate`,
-      member: `${domain ? domain.charAt(0).toUpperCase() + domain.slice(1) : "Core"} Member`
+      domain_director: "Domain Director",
+      associate_lead: "Associate Lead",
+      member: "Core Member"
     };
-    return roleMap[rawRole] || rawRole.replace("_", " ");
+    return roleMap[rawRole] || rawRole.replace("_", " ").toUpperCase();
   };
 
+  const domainDisplay = (profile.domain || "Executive").toUpperCase();
+
   return (
-    <div className="space-y-4 md:space-y-6 pb-6">
+    <div className="space-y-4 md:space-y-5 pb-6">
       
-      {/* Greeting Banner */}
-      <div className="neo-flat rounded-[2rem] p-5 md:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative overflow-hidden">
-        <div className="space-y-0.5 relative z-10">
-          <p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-500">
-            {greeting},
-          </p>
-          <h2 className="text-lg md:text-2xl font-black tracking-tight">
-            <span className="text-gradient">{profile.full_name}</span>
-          </h2>
-          <p className="text-[10px] md:text-[11px] font-bold opacity-60 uppercase tracking-wider">
-            {formatDesignation(profile.role, profile.domain)} • GFG SRMIST
-          </p>
+      {/* Dynamic Theme-Adapted Hero Banner */}
+      <div 
+        style={timePhase.gradientStyle}
+        className="neo-flat rounded-[2rem] p-5 md:p-6 relative overflow-hidden border border-white/10 shadow-lg transition-all duration-700"
+      >
+        {/* Top Time Phase Badge */}
+        <div className="flex items-center justify-between relative z-10 mb-2">
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/40 dark:bg-black/30 backdrop-blur-md border border-white/20 text-[10px] font-black uppercase tracking-widest text-[var(--text-main)] shadow-xs">
+            {timePhase.icon}
+            <span>{timePhase.badge}</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3 relative z-10 w-full md:w-auto justify-end">
-          <a 
-            href="https://chat.whatsapp.com/JuIQo4lWYsCJSqcBtXTV98" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="w-full md:w-auto px-4 py-2.5 neo-btn rounded-xl text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2 border border-emerald-500/30"
-          >
-            <MessageCircle className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span>Community Chat</span>
-            <ArrowUpRight className="w-3.5 h-3.5 opacity-50 shrink-0" />
-          </a>
+        {/* Greeting Body */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
+          <div className="space-y-1 max-w-2xl">
+            <p className="text-[10px] font-black uppercase tracking-widest opacity-70">
+              {timePhase.greeting},
+            </p>
+            
+            {/* Bold Name Typography */}
+            <h1 className={`text-2xl sm:text-3xl md:text-4xl font-[900] tracking-tight bg-gradient-to-r ${timePhase.nameColorClass} bg-clip-text text-transparent drop-shadow-xs`}>
+              {profile.full_name}
+            </h1>
+
+            {/* Badges: Role & Domain */}
+            <div className="flex flex-wrap items-center gap-2 pt-2.5">
+              {/* Badge 1: Role */}
+              <div className={`px-3 py-1 rounded-xl backdrop-blur-md text-[10px] font-black uppercase tracking-wider border flex items-center gap-1.5 shadow-xs ${timePhase.badgeContainerStyle}`}>
+                <Crown className="w-3 h-3 shrink-0" />
+                <span>{formatRoleTitle(profile.role)}</span>
+              </div>
+
+              {/* Badge 2: Domain */}
+              <div className="px-3 py-1 rounded-xl bg-white/40 dark:bg-black/30 backdrop-blur-md text-[10px] font-black uppercase tracking-wider opacity-90 flex items-center gap-1.5 border border-white/20">
+                <Layers className="w-3 h-3 text-teal-400 shrink-0" />
+                <span>{domainDisplay} Domain</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 w-full md:w-auto shrink-0 pt-1 md:pt-0">
+            <a 
+              href="https://chat.whatsapp.com/JuIQo4lWYsCJSqcBtXTV98" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className={`w-full md:w-auto px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-md hover:scale-105 active:scale-95 transition-all ${timePhase.buttonStyle}`}
+            >
+              <MessageCircle className="w-4 h-4 shrink-0" />
+              <span>Track WhatsApp Community</span>
+              <ArrowUpRight className="w-3.5 h-3.5 opacity-80 shrink-0" />
+            </a>
+          </div>
         </div>
+
       </div>
 
       {/* Top Square Metric Row */}
@@ -245,12 +380,12 @@ export default function DashboardOverview() {
         <div className="neo-flat rounded-2xl p-3.5 flex flex-col justify-between h-24">
           <div className="flex items-center justify-between text-emerald-500">
             <Clock className="w-4 h-4" />
-            <span className="text-[9px] font-mono font-black text-emerald-500/90 uppercase tracking-wider">
-              {currentDate || "02 OCT 2026"}
+            <span className="text-[9px] font-mono font-black uppercase tracking-wider text-emerald-500">
+              {currentDate || "04 OCT 2026"}
             </span>
           </div>
           <div>
-            <p className="text-lg md:text-2xl font-mono font-extrabold text-emerald-500 leading-none">{currentTime || "18:02:29"}</p>
+            <p className="text-lg md:text-2xl font-mono font-extrabold text-emerald-500 leading-none">{currentTime || "03:00:00"}</p>
             <p className="text-[9px] font-bold opacity-50 uppercase tracking-wider mt-1">Station Time</p>
           </div>
         </div>
@@ -443,7 +578,7 @@ export default function DashboardOverview() {
             {isLead && (
               <button
                 onClick={() => setShowAddEventModal(true)}
-                className="p-1.5 neo-btn rounded-xl text-[9px] font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-1 hover:scale-105 transition-all"
+                className="p-1.5 neo-btn rounded-xl text-[9px] font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-1 hover:scale-105 transition-all cursor-pointer"
               >
                 <Plus className="w-3 h-3" /> Event
               </button>
@@ -467,7 +602,7 @@ export default function DashboardOverview() {
                   {isLead && (
                     <button
                       onClick={() => setDeleteConfirmModal({ isOpen: true, eventId: evt.id, title: evt.title })}
-                      className="p-2 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-colors shrink-0"
+                      className="p-2 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-colors shrink-0 cursor-pointer"
                       title="Delete Event"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -505,7 +640,7 @@ export default function DashboardOverview() {
 
       </div>
 
-      {/* Custom Professional Confirmation Dialog Modal */}
+      {/* Confirmation Dialog Modal for Deletion */}
       {deleteConfirmModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
@@ -528,7 +663,7 @@ export default function DashboardOverview() {
               <button
                 type="button"
                 onClick={() => setDeleteConfirmModal({ isOpen: false, eventId: null, title: "" })}
-                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold"
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
               >
                 Cancel
               </button>
@@ -536,7 +671,7 @@ export default function DashboardOverview() {
                 type="button"
                 disabled={isDeleting}
                 onClick={confirmAndDeleteEvent}
-                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30"
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 border border-rose-500/30 cursor-pointer"
               >
                 {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Delete Event"}
               </button>
@@ -557,7 +692,7 @@ export default function DashboardOverview() {
               placeholder="Event Title (e.g. JAVA-VERSE 2026)"
               value={eventTitle}
               onChange={(e) => setEventTitle(e.target.value)}
-              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
             />
 
             <input
@@ -565,7 +700,7 @@ export default function DashboardOverview() {
               required
               value={eventDate}
               onChange={(e) => setEventDate(e.target.value)}
-              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
             />
 
             <input
@@ -573,21 +708,21 @@ export default function DashboardOverview() {
               placeholder="Venue (e.g. TP Ganesan Auditorium / Tech Park)"
               value={eventLocation}
               onChange={(e) => setEventLocation(e.target.value)}
-              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
             />
 
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setShowAddEventModal(false)}
-                className="w-1/2 py-2.5 neo-btn rounded-xl text-xs font-bold"
+                className="w-1/2 py-2.5 neo-btn rounded-xl text-xs font-bold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isCreatingEvent}
-                className="w-1/2 py-2.5 neo-btn-green rounded-xl text-xs font-bold flex justify-center items-center gap-2"
+                className="w-1/2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex justify-center items-center gap-2 cursor-pointer shadow-md"
               >
                 {isCreatingEvent ? <Loader2 className="w-4 h-4 animate-spin" /> : "Publish Event"}
               </button>

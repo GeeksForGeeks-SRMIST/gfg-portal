@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "@/app/globals.css";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
 import { GlobalAlert } from "@/components/GlobalAlert";
+import { Providers } from "@/components/Providers";
 
 export const metadata: Metadata = {
   title: "GFG SRMIST Portal | Core Team",
@@ -32,15 +33,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="icon" href="/gfg.png" sizes="any" />
         <link rel="apple-touch-icon" href="/gfg.png" />
       </head>
       <body className="antialiased bg-[var(--bg-base)] text-[var(--text-main)]">
-        {children}
-        <PwaInstallPrompt />
-        <GlobalAlert />
+        <Providers>
+          {children}
+          <PwaInstallPrompt />
+          <GlobalAlert />
+        </Providers>
       </body>
     </html>
   );

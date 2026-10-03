@@ -4,10 +4,11 @@ import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { 
   Bell, Plus, Loader2, Trash2, Send, AlertTriangle, CheckCircle2, 
-  Bold, Italic, List, Code, Link2, ExternalLink, Sparkles 
+  Bold, Italic, List, Code, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock
 } from "lucide-react";
 
 export default function NoticesPage() {
+  const [activeTab, setActiveTab] = useState<"board" | "post">("board");
   const [notices, setNotices] = useState<any[]>([]);
   const [profile, setProfile] = useState<any>(null);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -67,6 +68,8 @@ export default function NoticesPage() {
     setLoading(false);
   }
 
+  const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(profile?.role?.toLowerCase());
+
   // Text Formatting Helpers for Textarea
   function insertFormatting(syntaxBefore: string, syntaxAfter: string = "") {
     const textarea = textareaRef.current;
@@ -90,13 +93,10 @@ export default function NoticesPage() {
   function renderFormattedContent(text: string) {
     if (!text) return null;
 
-    // Pattern for URLs (HTTP/HTTPS/WWW)
     const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/g;
-
     const paragraphs = text.split("\n");
 
     return paragraphs.map((paragraph, pIdx) => {
-      // Split paragraph into tokens matching URLs
       const parts = paragraph.split(urlRegex);
 
       return (
@@ -118,7 +118,6 @@ export default function NoticesPage() {
               );
             }
 
-            // Simple inline Markdown support for **bold** and *italic*
             let formattedPart: React.ReactNode = part;
             if (part.includes("**")) {
               const boldSegments = part.split(/\*\*(.*?)\*\*/g);
@@ -136,7 +135,7 @@ export default function NoticesPage() {
 
   async function handlePublish(e: React.FormEvent) {
     e.preventDefault();
-    if (!title || !content) return;
+    if (!title || !content || !isLead) return;
     setIsPublishing(true);
 
     // 1. Insert Notice
@@ -158,7 +157,9 @@ export default function NoticesPage() {
     setContent("");
     setIsImportant(false);
     setIsPublishing(false);
-    fetchData();
+    
+    await fetchData();
+    setActiveTab("board"); // Auto-switch to Notice Board tab after posting
   }
 
   async function confirmAndDeleteNotice() {
@@ -188,38 +189,65 @@ export default function NoticesPage() {
     });
   }
 
-  const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(profile?.role);
-
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center gap-3 px-2">
-        <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
-          <Bell className="w-6 h-6"/>
+    <div className="space-y-6 max-w-5xl mx-auto pb-12">
+      
+      {/* Page Header & Navigation Tabs */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-2">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
+            <Bell className="w-6 h-6"/>
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-gradient">Announcements & Notices</h2>
+            <p className="text-xs font-semibold opacity-60">Official board updates, broadcasts, and reminders.</p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-xl font-black text-gradient">Notice Board</h2>
-          <p className="text-xs font-semibold opacity-60">Official announcements, reminders, and meeting updates.</p>
+
+        {/* Tab Switcher Bar */}
+        <div className="flex p-1.5 neo-pressed rounded-2xl shrink-0 self-start sm:self-center">
+          <button
+            onClick={() => setActiveTab("board")}
+            className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === "board" 
+                ? "neo-flat text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 shadow-sm" 
+                : "opacity-60 hover:opacity-100"
+            }`}
+          >
+            <LayoutList className="w-3.5 h-3.5" /> Notice Board
+          </button>
+
+          <button
+            onClick={() => setActiveTab("post")}
+            className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === "post" 
+                ? "neo-flat text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 shadow-sm" 
+                : "opacity-60 hover:opacity-100"
+            }`}
+          >
+            {isLead ? <PenSquare className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} 
+            Post Notice
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        
-        {/* Notices Feed */}
-        <div className={`flex flex-col gap-4 ${isLead ? 'lg:col-span-8' : 'lg:col-span-12'}`}>
+      {/* TAB 1: NOTICE BOARD FEED */}
+      {activeTab === "board" && (
+        <div className="flex flex-col gap-4 animate-in fade-in duration-200">
           {loading ? (
-            <div className="flex justify-center p-10"><Loader2 className="w-6 h-6 animate-spin opacity-50"/></div>
+            <div className="flex justify-center p-12"><Loader2 className="w-6 h-6 animate-spin opacity-50"/></div>
           ) : notices.length === 0 ? (
-            <div className="neo-flat rounded-3xl p-10 text-center opacity-50">No announcements published yet.</div>
+            <div className="neo-flat rounded-3xl p-12 text-center opacity-50 text-xs font-bold">
+              No announcements published yet.
+            </div>
           ) : (
             notices.map((notice) => (
-              <div key={notice.id} className="neo-flat rounded-3xl p-6 flex flex-col gap-4 relative overflow-hidden transition-all">
+              <div key={notice.id} className="neo-flat rounded-3xl p-6 flex flex-col gap-4 relative overflow-hidden transition-all border border-white/5">
                 {/* Left urgency indicator bar */}
                 <div className={`absolute top-0 left-0 w-2 h-full ${notice.is_important ? 'bg-gradient-to-b from-rose-500 to-amber-500' : 'bg-emerald-500'}`} />
                 
                 <div className="space-y-3 pl-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    {/* Urgency-based Heading styling */}
                     <div className="flex items-center gap-2">
                       <h3 className={`text-base font-black tracking-tight ${
                         notice.is_important 
@@ -240,13 +268,13 @@ export default function NoticesPage() {
                     </span>
                   </div>
 
-                  {/* Formatted Notice Content with auto-detected Links */}
-                  <div className="text-xs opacity-90 space-y-1.5 font-medium">
+                  {/* Notice Content */}
+                  <div className="text-xs opacity-90 space-y-1.5 font-medium leading-relaxed">
                     {renderFormattedContent(notice.content)}
                   </div>
                 </div>
 
-                {/* Footer Meta & Lead Actions */}
+                {/* Footer Metadata & Actions */}
                 <div className="pt-3 border-t border-[var(--text-muted)]/10 flex items-center justify-between pl-3">
                   <p className="text-[9px] font-extrabold text-emerald-500 uppercase tracking-widest">
                     Posted by {notice.author?.full_name || "Executive Lead"} • {notice.author?.role?.replace("_", " ")}
@@ -275,17 +303,30 @@ export default function NoticesPage() {
             ))
           )}
         </div>
+      )}
 
-        {/* Create Notice Form (Leads Only) */}
-        {isLead && (
-          <div className="lg:col-span-4">
-            <form onSubmit={handlePublish} className="neo-flat rounded-3xl p-6 space-y-4 sticky top-28">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Publish Announcement</h3>
-                <Sparkles className="w-4 h-4 text-emerald-500 opacity-60"/>
+      {/* TAB 2: POST NOTICE FORM */}
+      {activeTab === "post" && (
+        <div className="animate-in fade-in duration-200">
+          {!isLead ? (
+            <div className="neo-flat rounded-3xl p-10 text-center space-y-3">
+              <Lock className="w-8 h-8 text-rose-500 mx-auto opacity-80" />
+              <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Access Restricted</h3>
+              <p className="text-xs opacity-60 max-w-sm mx-auto">
+                Only chapter leads (President, Secretary, Joint Secretary, Domain Directors) are authorized to publish official notices.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handlePublish} className="neo-flat rounded-3xl p-8 space-y-5 bg-[var(--bg-surface)]">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Publish New Notice</h3>
+                  <p className="text-[10px] opacity-60 mt-0.5">Dispatches real-time broadcast to all chapter members</p>
+                </div>
+                <Sparkles className="w-5 h-5 text-emerald-500 opacity-60"/>
               </div>
               
-              {/* Notice Title Input */}
+              {/* Heading */}
               <div className="space-y-1">
                 <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Heading / Subject *</label>
                 <input
@@ -298,7 +339,7 @@ export default function NoticesPage() {
                 />
               </div>
 
-              {/* Notice Description Field & Formatting Bar */}
+              {/* Notice Content & Formatting Bar */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between px-1">
                   <label className="text-[9px] font-extrabold uppercase opacity-60">Description & Links *</label>
@@ -308,7 +349,7 @@ export default function NoticesPage() {
                     <button
                       type="button"
                       onClick={() => insertFormatting("**", "**")}
-                      className="p-1 neo-btn rounded-md hover:text-emerald-500 transition-colors"
+                      className="p-1.5 neo-btn rounded-md hover:text-emerald-500 transition-colors cursor-pointer"
                       title="Bold"
                     >
                       <Bold className="w-3 h-3"/>
@@ -316,7 +357,7 @@ export default function NoticesPage() {
                     <button
                       type="button"
                       onClick={() => insertFormatting("*", "*")}
-                      className="p-1 neo-btn rounded-md hover:text-emerald-500 transition-colors"
+                      className="p-1.5 neo-btn rounded-md hover:text-emerald-500 transition-colors cursor-pointer"
                       title="Italic"
                     >
                       <Italic className="w-3 h-3"/>
@@ -324,7 +365,7 @@ export default function NoticesPage() {
                     <button
                       type="button"
                       onClick={() => insertFormatting("\n- ")}
-                      className="p-1 neo-btn rounded-md hover:text-emerald-500 transition-colors"
+                      className="p-1.5 neo-btn rounded-md hover:text-emerald-500 transition-colors cursor-pointer"
                       title="Bullet Point"
                     >
                       <List className="w-3 h-3"/>
@@ -332,7 +373,7 @@ export default function NoticesPage() {
                     <button
                       type="button"
                       onClick={() => insertFormatting("https://")}
-                      className="p-1 neo-btn rounded-md hover:text-emerald-500 transition-colors"
+                      className="p-1.5 neo-btn rounded-md hover:text-emerald-500 transition-colors cursor-pointer"
                       title="Insert URL Link"
                     >
                       <Link2 className="w-3 h-3"/>
@@ -342,34 +383,33 @@ export default function NoticesPage() {
 
                 <textarea
                   ref={textareaRef}
-                  placeholder="Type description, meeting links (e.g. [https://meet.google.com/xyz](https://meet.google.com/xyz)), agendas..."
+                  placeholder="Type description, meeting links (e.g. https://meet.google.com/xyz), agendas..."
                   required
-                  rows={6}
+                  rows={8}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   className="w-full px-4 py-3 neo-pressed rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-transparent font-medium custom-scrollbar resize-none leading-relaxed"
                 />
               </div>
 
-              {/* Priority Selector */}
+              {/* High Priority Toggle */}
               <label className="flex items-center gap-2 cursor-pointer pt-1">
                 <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} className="peer sr-only" />
                 <div className="w-5 h-5 neo-pressed rounded-md flex items-center justify-center peer-checked:text-rose-500 transition-colors shrink-0">
                   {isImportant && <AlertTriangle className="w-3.5 h-3.5"/>}
                 </div>
-                <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">Mark as High Priority (Red Alert)</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">Mark as High Priority (Red Alert Broadcast)</span>
               </label>
 
-              <button type="submit" disabled={isPublishing} className="w-full py-3 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex justify-center items-center gap-2 cursor-pointer shadow-lg">
-                {isPublishing ? <Loader2 className="w-4 h-4 animate-spin"/> : <><Plus className="w-4 h-4"/> Publish & Notify All</>}
+              <button type="submit" disabled={isPublishing} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex justify-center items-center gap-2 cursor-pointer shadow-lg">
+                {isPublishing ? <Loader2 className="w-4 h-4 animate-spin"/> : <><Plus className="w-4 h-4"/> Publish & Broadcast Notice</>}
               </button>
             </form>
-          </div>
-        )}
+          )}
+        </div>
+      )}
 
-      </div>
-
-      {/* Custom Confirmation Dialog Modal for Deletion */}
+      {/* Confirmation Modal for Notice Deletion */}
       {deleteModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
@@ -409,7 +449,7 @@ export default function NoticesPage() {
         </div>
       )}
 
-      {/* Custom Alert Modal for Reminder Feedback */}
+      {/* Alert Modal for Reminders */}
       {alertModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
