@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "@/app/globals.css";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
 import { GlobalAlert } from "@/components/GlobalAlert";
@@ -19,6 +19,13 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: "#2f8d46",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -29,7 +36,6 @@ export default function RootLayout({
       <head>
         <link rel="icon" href="/gfg.png" sizes="any" />
         <link rel="apple-touch-icon" href="/gfg.png" />
-        <meta name="theme-color" content="#2f8d46" />
       </head>
       <body className="antialiased bg-[var(--bg-base)] text-[var(--text-main)]">
         {children}
