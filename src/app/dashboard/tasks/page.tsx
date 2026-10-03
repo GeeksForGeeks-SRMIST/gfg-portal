@@ -15,7 +15,11 @@ import {
   Lock,
   Sparkles,
   TrendingDown,
-  AlertTriangle
+  AlertTriangle,
+  Globe,
+  Hand,
+  User,
+  Users
 } from "lucide-react";
 
 export default function TasksPage() {
@@ -26,13 +30,25 @@ export default function TasksPage() {
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Tab State
-  const [activeTab, setActiveTab] = useState<"assigned" | "submissions" | "ledger" | "create" | "bonus" | "penalty">("assigned");
+  // Dynamic Tab State
+  const [activeTab, setActiveTab] = useState<"assigned" | "submissions" | "completed" | "ledger" | "create" | "bonus" | "penalty">("assigned");
+
+  // Filter Sub-tab for Leads: "my_tasks" vs "all_chapter_tasks"
+  const [taskViewFilter, setTaskViewFilter] = useState<"my_tasks" | "all_chapter_tasks">("my_tasks");
+
+  // Domain Filter States for Member Dropdowns
+  const [taskDomainFilter, setTaskDomainFilter] = useState("all");
+  const [bonusDomainFilter, setBonusDomainFilter] = useState("all");
+  const [penaltyDomainFilter, setPenaltyDomainFilter] = useState("all");
 
   // Re-assign Task Modal State
   const [reassignTask, setReassignTask] = useState<any>(null);
+  const [reassignDomainFilter, setReassignDomainFilter] = useState("all");
   const [newAssigneeId, setNewAssigneeId] = useState("");
   const [isReassigning, setIsReassigning] = useState(false);
+
+  // Claim Floating Task State
+  const [claimingTaskId, setClaimingTaskId] = useState<string | null>(null);
 
   // Submission Form State (Member)
   const [selectedTask, setSelectedTask] = useState<any>(null);
@@ -45,6 +61,7 @@ export default function TasksPage() {
   const [processingReview, setProcessingReview] = useState(false);
 
   // New Task Creation State (Lead)
+  const [taskType, setTaskType] = useState<"direct" | "floating">("direct");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDesc, setTaskDesc] = useState("");
   const [taskAssignee, setTaskAssignee] = useState("");
@@ -52,7 +69,7 @@ export default function TasksPage() {
   const [taskDeadline, setTaskDeadline] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
 
-  // Executive Bonus Points State (Updated Options)
+  // Executive Bonus Points State
   const [bonusMemberId, setBonusMemberId] = useState("");
   const [bonusCategory, setBonusCategory] = useState<string>("leadership");
   const [bonusReason, setBonusReason] = useState("");
@@ -64,7 +81,7 @@ export default function TasksPage() {
   const [penaltyReason, setPenaltyReason] = useState("");
   const [issuingPenalty, setIssuingPenalty] = useState(false);
 
-  // Custom Modal States for Alerts & Deletion
+  // Custom Modal States
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; taskId: string | null; title: string }>({
     isOpen: false, taskId: null, title: ""
   });
@@ -117,15 +134,18 @@ export default function TasksPage() {
 
     const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(pData?.role);
 
-    // 1. Fetch Tasks
-    let taskQuery = supabase.from("tasks").select("*, assigned_member:profiles!tasks_assigned_to_fkey(full_name, domain, role), assigner:profiles!tasks_assigned_by_fkey(full_name, role)").order("created_at", { ascending: false });
+    let taskQuery = supabase
+      .from("tasks")
+      .select("*, assigned_member:profiles!tasks_assigned_to_fkey(full_name, domain, role), assigner:profiles!tasks_assigned_by_fkey(full_name, role)")
+      .order("created_at", { ascending: false });
+
     if (!isLead) {
-      taskQuery = taskQuery.eq("assigned_to", user.id);
+      taskQuery = taskQuery.or(`assigned_to.eq.${user.id},assigned_to.is.null`);
     }
+
     const { data: tData } = await taskQuery;
     setTasks(tData || []);
 
-    // 2. Fetch Submissions
     const { data: subData } = await supabase
       .from("task_submissions")
       .select("*, task:tasks(*), member:profiles!task_submissions_member_id_fkey(id, full_name, domain, role)")
@@ -133,7 +153,6 @@ export default function TasksPage() {
     
     setSubmissions(subData || []);
 
-    // 3. Fetch Ledger Points
     const { data: lData } = await supabase
       .from("points_ledger")
       .select("*")
@@ -141,11 +160,31 @@ export default function TasksPage() {
       .order("created_at", { ascending: false });
     setLedger(lData || []);
 
-    // 4. Fetch Approved Members for dropdowns
     const { data: mData } = await supabase.from("profiles").select("id, full_name, domain, role").eq("status", "approved");
     setMembers(mData || []);
 
     setLoading(false);
+  }
+
+  const filterMembersByDomain = (domain: string) => {
+    if (domain === "all") return members;
+    return members.filter(m => m.domain?.toLowerCase() === domain.toLowerCase());
+  };
+
+  async function handleClaimTask(taskId: string) {
+    setClaimingTaskId(taskId);
+    const { error } = await supabase
+      .from("tasks")
+      .update({ assigned_to: profile.id })
+      .eq("id", taskId);
+
+    if (error) {
+      setAlertModal({ isOpen: true, message: "Failed to claim task: " + error.message });
+    } else {
+      setAlertModal({ isOpen: true, message: "Task claimed successfully! You can now submit your work." });
+      fetchPageData();
+    }
+    setClaimingTaskId(null);
   }
 
   async function handleAwardBonus(e: React.FormEvent) {
@@ -235,11 +274,16 @@ export default function TasksPage() {
 
   async function handleCreateTask(e: React.FormEvent) {
     e.preventDefault();
-    if (!taskTitle || !taskAssignee || !taskDeadline) return;
+    if (!taskTitle || !taskDeadline) return;
+    if (taskType === "direct" && !taskAssignee) {
+      setAlertModal({ isOpen: true, message: "Please select an assignee member for direct assignment." });
+      return;
+    }
+
     setCreatingTask(true);
 
     const targetMember = members.find(m => m.id === taskAssignee);
-    if (targetMember && !canReviewSubmission(profile.role, targetMember.role)) {
+    if (taskType === "direct" && targetMember && !canReviewSubmission(profile.role, targetMember.role)) {
       setAlertModal({ isOpen: true, message: `Hierarchy Restriction: You cannot assign tasks to a member with an equal or higher rank (${targetMember.role}).` });
       setCreatingTask(false);
       return;
@@ -248,7 +292,7 @@ export default function TasksPage() {
     const { error } = await supabase.from("tasks").insert({
       title: taskTitle,
       description: taskDesc,
-      assigned_to: taskAssignee,
+      assigned_to: taskType === "floating" ? null : taskAssignee,
       assigned_by: profile.id,
       points: taskPoints || 10,
       deadline: taskDeadline,
@@ -261,12 +305,21 @@ export default function TasksPage() {
       return;
     }
 
-    await supabase.from("notifications").insert({
-      title: `📋 New Task Assigned: ${taskTitle}`,
-      message: `You were assigned a deliverable worth ${taskPoints} PTS by ${profile?.full_name}.`,
-      target_user_id: taskAssignee,
-      type: "task"
-    });
+    if (taskType === "direct" && taskAssignee) {
+      await supabase.from("notifications").insert({
+        title: `📋 New Task Assigned: ${taskTitle}`,
+        message: `You were assigned a deliverable worth ${taskPoints} PTS by ${profile?.full_name}.`,
+        target_user_id: taskAssignee,
+        type: "task"
+      });
+    } else {
+      await supabase.from("notifications").insert({
+        title: `🌐 New Floating Task Available: ${taskTitle}`,
+        message: `An open deliverable worth ${taskPoints} PTS was created. Anyone can claim it now!`,
+        target_user_id: null,
+        type: "notice"
+      });
+    }
 
     setTaskTitle("");
     setTaskDesc("");
@@ -292,14 +345,25 @@ export default function TasksPage() {
     if (!reassignTask || !newAssigneeId) return;
     setIsReassigning(true);
 
-    await supabase.from("tasks").update({ assigned_to: newAssigneeId }).eq("id", reassignTask.id);
+    const targetAssignedTo = newAssigneeId === "floating" ? null : newAssigneeId;
 
-    await supabase.from("notifications").insert({
-      title: `📋 Task Re-assigned: ${reassignTask.title}`,
-      message: `A deliverable was re-assigned to you by ${profile?.full_name}.`,
-      target_user_id: newAssigneeId,
-      type: "task"
-    });
+    await supabase.from("tasks").update({ assigned_to: targetAssignedTo }).eq("id", reassignTask.id);
+
+    if (targetAssignedTo) {
+      await supabase.from("notifications").insert({
+        title: `📋 Task Re-assigned: ${reassignTask.title}`,
+        message: `A deliverable was re-assigned to you by ${profile?.full_name}.`,
+        target_user_id: targetAssignedTo,
+        type: "task"
+      });
+    } else {
+      await supabase.from("notifications").insert({
+        title: `🌐 Task Made Floating: ${reassignTask.title}`,
+        message: `A deliverable is now unassigned and available for anyone to claim!`,
+        target_user_id: null,
+        type: "notice"
+      });
+    }
 
     setReassignTask(null);
     setNewAssigneeId("");
@@ -374,147 +438,223 @@ export default function TasksPage() {
   const isPresident = profile?.role === 'president';
   const myTotalPoints = ledger.reduce((acc, item) => acc + item.points_awarded, 0);
 
+  // Filter Active Pending Tasks
+  const activePendingTasks = tasks.filter(t => t.status !== "completed");
+  
+  // Categorize Tasks between My Assigned/Floating vs Other Chapter Members' Tasks
+  const myDirectAndFloatingTasks = activePendingTasks.filter(t => t.assigned_to === profile?.id || t.assigned_to === null);
+  const otherMembersTasks = activePendingTasks.filter(t => t.assigned_to !== profile?.id && t.assigned_to !== null);
+
+  const completedTasks = tasks.filter(t => t.status === "completed");
+  const pendingSubmissionsCount = submissions.filter(s => s.status === "pending_review").length;
+
+  const currentDisplayTasks = isLead 
+    ? (taskViewFilter === "my_tasks" ? myDirectAndFloatingTasks : otherMembersTasks)
+    : myDirectAndFloatingTasks;
+
   return (
     <div className="space-y-6">
       
-      {/* Header & Sub-Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-2">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
-            <CheckSquare className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-xl font-extrabold text-gradient">Tasks & Points Ledger</h2>
-            <p className="text-xs font-semibold opacity-60">Deliverable management, proof submissions, and earned contribution points.</p>
-          </div>
+      {/* 1. Header (Heading and Short Description) */}
+      <div className="flex items-center gap-3 px-2">
+        <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
+          <CheckSquare className="w-6 h-6" />
         </div>
-
-        {/* Tab Controls */}
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setActiveTab("assigned")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "assigned" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
-          >
-            Tasks ({tasks.length})
-          </button>
-          
-          <button
-            onClick={() => setActiveTab("submissions")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "submissions" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
-          >
-            Submissions Queue
-          </button>
-
-          <button
-            onClick={() => setActiveTab("ledger")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "ledger" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
-          >
-            Points History
-          </button>
-
-          {isLead && (
-            <button
-              onClick={() => setActiveTab("create")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "create" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
-            >
-              <Plus className="w-3.5 h-3.5" /> Assign Task
-            </button>
-          )}
-
-          {isExecutiveLead && (
-            <button
-              onClick={() => setActiveTab("bonus")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "bonus" ? "neo-pressed text-amber-500" : "neo-btn text-amber-500"}`}
-            >
-              <Sparkles className="w-3.5 h-3.5" /> Award Bonus
-            </button>
-          )}
-
-          {isPresident && (
-            <button
-              onClick={() => setActiveTab("penalty")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "penalty" ? "neo-pressed text-rose-500" : "neo-btn text-rose-500"}`}
-            >
-              <TrendingDown className="w-3.5 h-3.5" /> Deduct Points
-            </button>
-          )}
+        <div>
+          <h2 className="text-xl font-extrabold text-gradient">Tasks & Points Ledger</h2>
+          <p className="text-xs font-semibold opacity-60">Deliverable management, proof submissions, and earned contribution points.</p>
         </div>
       </div>
 
-      {/* TAB 1: Task Directory */}
+      {/* 2. Navigation Tab Buttons (Placed neatly below the heading line) */}
+      <div className="flex flex-wrap gap-2 pt-1 border-b border-[var(--text-muted)]/10 pb-4 px-2">
+        <button
+          onClick={() => setActiveTab("assigned")}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "assigned" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+        >
+          Tasks ({activePendingTasks.length})
+        </button>
+        
+        <button
+          onClick={() => setActiveTab("submissions")}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "submissions" ? "neo-pressed text-amber-500" : "neo-btn opacity-70"}`}
+        >
+          Submissions Queue ({pendingSubmissionsCount})
+        </button>
+
+        <button
+          onClick={() => setActiveTab("completed")}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "completed" ? "neo-pressed text-emerald-400" : "neo-btn opacity-70"}`}
+        >
+          Completed Tasks ({completedTasks.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab("ledger")}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "ledger" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+        >
+          Points History
+        </button>
+
+        {isLead && (
+          <button
+            onClick={() => setActiveTab("create")}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "create" ? "neo-pressed text-emerald-500" : "neo-btn text-emerald-500"}`}
+          >
+            <Plus className="w-3.5 h-3.5" /> Create Task
+          </button>
+        )}
+
+        {isExecutiveLead && (
+          <button
+            onClick={() => setActiveTab("bonus")}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "bonus" ? "neo-pressed text-amber-500" : "neo-btn text-amber-500"}`}
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Award Bonus
+          </button>
+        )}
+
+        {isPresident && (
+          <button
+            onClick={() => setActiveTab("penalty")}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "penalty" ? "neo-pressed text-rose-500" : "neo-btn text-rose-500"}`}
+          >
+            <TrendingDown className="w-3.5 h-3.5" /> Deduct Points
+          </button>
+        )}
+      </div>
+
+      {/* TAB 1: Tasks Feed (With Sub-Filter for Leads to separate My Tasks vs Other Assigned Tasks) */}
       {activeTab === "assigned" && (
         <div className="space-y-4">
+          
+          {/* Sub-Switch for Executive Leads to differentiate My Direct Tasks vs Other Assigned Tasks */}
+          {isLead && (
+            <div className="flex items-center gap-2 p-1.5 neo-pressed rounded-2xl max-w-md">
+              <button
+                onClick={() => setTaskViewFilter("my_tasks")}
+                className={`w-1/2 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  taskViewFilter === "my_tasks" ? "neo-flat text-emerald-500" : "opacity-60"
+                }`}
+              >
+                <User className="w-3.5 h-3.5" /> My Direct Tasks ({myDirectAndFloatingTasks.length})
+              </button>
+              <button
+                onClick={() => setTaskViewFilter("all_chapter_tasks")}
+                className={`w-1/2 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  taskViewFilter === "all_chapter_tasks" ? "neo-flat text-amber-500" : "opacity-60"
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" /> All Chapter Tasks ({otherMembersTasks.length})
+              </button>
+            </div>
+          )}
+
           {loading ? (
             <div className="flex justify-center p-12"><Loader2 className="w-6 h-6 animate-spin opacity-50" /></div>
-          ) : tasks.length === 0 ? (
+          ) : currentDisplayTasks.length === 0 ? (
             <div className="neo-flat rounded-2xl p-12 text-center opacity-50 space-y-2">
               <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-500" />
-              <p className="text-xs font-bold">No active tasks found.</p>
+              <p className="text-xs font-bold">
+                {isLead && taskViewFilter === "all_chapter_tasks" 
+                  ? "No tasks currently assigned to other team members." 
+                  : "No pending tasks assigned to you right now."}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {tasks.map((task) => (
-                <div key={task.id} className="neo-flat rounded-2xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden border border-white/5">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={`text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border ${
-                        task.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                      }`}>
-                        {task.status}
-                      </span>
-                      <span className="text-xs font-mono font-extrabold text-emerald-500">
-                        +{task.points} PTS
-                      </span>
-                    </div>
+              {currentDisplayTasks.map((task) => {
+                const isFloating = task.assigned_to === null;
 
-                    <h3 className="text-sm font-bold pt-1">{task.title}</h3>
-                    <p className="text-xs opacity-70 leading-relaxed line-clamp-3">{task.description}</p>
-                  </div>
-
-                  <div className="space-y-2.5 pt-3 border-t border-[var(--text-muted)]/10">
-                    <div className="flex items-center justify-between text-[10px] font-bold opacity-60">
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-amber-500" /> Deadline:</span>
-                      <span>{new Date(task.deadline).toLocaleDateString()}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[10px] font-bold">
-                      <span className="opacity-50">Assigned To:</span>
-                      <span className="text-emerald-500">{task.assigned_member?.full_name || "Unassigned"}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[10px] font-bold">
-                      <span className="opacity-50">Assigned By:</span>
-                      <span className="text-amber-500">{task.assigner?.full_name || "Executive Board"}</span>
-                    </div>
-
-                    {!isLead && task.status === 'pending' && (
-                      <button
-                        onClick={() => setSelectedTask(task)}
-                        className="w-full py-2.5 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2 cursor-pointer"
-                      >
-                        <Send className="w-3 h-3" /> Submit Deliverable
-                      </button>
-                    )}
-
-                    {isLead && (
-                      <div className="flex items-center gap-2 pt-2">
-                        <button
-                          onClick={() => { setReassignTask(task); setNewAssigneeId(task.assigned_to); }}
-                          className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
-                        >
-                          <UserPlus className="w-3 h-3" /> Re-assign
-                        </button>
-                        <button
-                          onClick={() => setDeleteModal({ isOpen: true, taskId: task.id, title: task.title })}
-                          className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-rose-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
-                        >
-                          <Trash2 className="w-3 h-3" /> Delete
-                        </button>
+                return (
+                  <div
+                    key={task.id}
+                    className={`neo-flat rounded-2xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden border transition-all ${
+                      isFloating 
+                        ? "border-teal-500/40 bg-teal-500/5 shadow-lg shadow-teal-500/5" 
+                        : "border-white/5"
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        {isFloating ? (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-teal-500/10 text-teal-400 border-teal-500/30 flex items-center gap-1">
+                            <Globe className="w-2.5 h-2.5" /> Floating Task
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-amber-500/10 text-amber-500 border-amber-500/20">
+                            {task.status}
+                          </span>
+                        )}
+                        <span className="text-xs font-mono font-extrabold text-emerald-500">
+                          +{task.points} PTS
+                        </span>
                       </div>
-                    )}
+
+                      <h3 className="text-sm font-bold pt-1">{task.title}</h3>
+                      <p className="text-xs opacity-70 leading-relaxed line-clamp-3">{task.description}</p>
+                    </div>
+
+                    <div className="space-y-2.5 pt-3 border-t border-[var(--text-muted)]/10">
+                      <div className="flex items-center justify-between text-[10px] font-bold opacity-60">
+                        <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-amber-500" /> Deadline:</span>
+                        <span>{new Date(task.deadline).toLocaleDateString()}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span className="opacity-50">Assigned To:</span>
+                        <span className={isFloating ? "text-teal-400 font-extrabold" : "text-emerald-500"}>
+                          {isFloating ? "Anyone (Floating)" : task.assigned_member?.full_name}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span className="opacity-50">Assigned By:</span>
+                        <span className="text-amber-500">{task.assigner?.full_name || "Executive Board"}</span>
+                      </div>
+
+                      {/* Action 1: Floating Task -> Claim Button */}
+                      {isFloating && (
+                        <button
+                          onClick={() => handleClaimTask(task.id)}
+                          disabled={claimingTaskId === task.id}
+                          className="w-full py-2.5 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2 cursor-pointer shadow-lg"
+                        >
+                          {claimingTaskId === task.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Hand className="w-3.5 h-3.5" /> Claim Task</>}
+                        </button>
+                      )}
+
+                      {/* Action 2: Direct Task -> Submit Deliverable */}
+                      {!isFloating && task.assigned_to === profile?.id && task.status === 'pending' && (
+                        <button
+                          onClick={() => setSelectedTask(task)}
+                          className="w-full py-2.5 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2 cursor-pointer"
+                        >
+                          <Send className="w-3 h-3" /> Submit Deliverable
+                        </button>
+                      )}
+
+                      {/* Lead Control Actions */}
+                      {isLead && (
+                        <div className="flex items-center gap-2 pt-2">
+                          <button
+                            onClick={() => { setReassignTask(task); setNewAssigneeId(task.assigned_to || "floating"); }}
+                            className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
+                          >
+                            <UserPlus className="w-3 h-3" /> Re-assign
+                          </button>
+                          <button
+                            onClick={() => setDeleteModal({ isOpen: true, taskId: task.id, title: task.title })}
+                            className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-rose-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" /> Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -523,11 +663,16 @@ export default function TasksPage() {
       {/* TAB 2: Submissions Queue */}
       {activeTab === "submissions" && (
         <div className="neo-flat rounded-2xl p-6 space-y-4">
-          <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500 px-1">Deliverables & Proof Logs</h3>
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Deliverables & Proof Logs</h3>
+            <span className="text-xs font-mono font-bold px-2.5 py-1 neo-pressed rounded-xl text-amber-500">
+              Pending: {pendingSubmissionsCount}
+            </span>
+          </div>
           
           <div className="space-y-3">
             {submissions.length === 0 ? (
-              <p className="text-xs opacity-50 text-center py-8">No submissions pending review.</p>
+              <p className="text-xs opacity-50 text-center py-8">No submissions in queue.</p>
             ) : (
               submissions.map((sub) => {
                 const canReview = isLead && canReviewSubmission(profile.role, sub.member?.role);
@@ -544,7 +689,7 @@ export default function TasksPage() {
                         </span>
                       </div>
                       
-                      <p className="text-[10px] opacity-60">Submitted by <span className="text-emerald-500 font-bold">{sub.member?.full_name}</span></p>
+                      <p className="text-[10px] opacity-60">Submitted by <span className="text-emerald-500 font-bold">{sub.member?.full_name}</span> ({sub.member?.domain})</p>
                       {sub.notes && <p className="text-xs opacity-80 italic pt-1">"{sub.notes}"</p>}
                     </div>
 
@@ -585,7 +730,48 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* TAB 3: Points History Ledger */}
+      {/* TAB 3: Completed Tasks */}
+      {activeTab === "completed" && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="flex justify-center p-12"><Loader2 className="w-6 h-6 animate-spin opacity-50" /></div>
+          ) : completedTasks.length === 0 ? (
+            <div className="neo-flat rounded-2xl p-12 text-center opacity-50 space-y-2">
+              <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-500" />
+              <p className="text-xs font-bold">No completed tasks recorded yet.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {completedTasks.map((task) => (
+                <div key={task.id} className="neo-flat rounded-2xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden border border-emerald-500/20 bg-emerald-500/5">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-emerald-500/10 text-emerald-500 border-emerald-500/20 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Completed
+                      </span>
+                      <span className="text-xs font-mono font-extrabold text-emerald-500">
+                        +{task.points} PTS
+                      </span>
+                    </div>
+
+                    <h3 className="text-sm font-bold pt-1">{task.title}</h3>
+                    <p className="text-xs opacity-70 leading-relaxed line-clamp-3">{task.description}</p>
+                  </div>
+
+                  <div className="space-y-1.5 pt-3 border-t border-[var(--text-muted)]/10 text-[10px] font-bold">
+                    <div className="flex items-center justify-between">
+                      <span className="opacity-50">Completed By:</span>
+                      <span className="text-emerald-500">{task.assigned_member?.full_name || "Team Member"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: Points History Ledger */}
       {activeTab === "ledger" && (
         <div className="neo-flat rounded-2xl p-6 space-y-6">
           <div className="flex items-center justify-between border-b border-[var(--text-muted)]/10 pb-4 px-1">
@@ -622,11 +808,28 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* TAB 4: Assign Task Form (With updated 5, 10, 15, 20, 25 options) */}
+      {/* TAB 5: Create Task Form */}
       {activeTab === "create" && isLead && (
         <form onSubmit={handleCreateTask} className="neo-flat rounded-2xl p-6 max-w-xl space-y-4">
-          <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Assign Member Deliverable</h3>
+          <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Create Deliverable / Task</h3>
           
+          <div className="flex gap-2 p-1 neo-pressed rounded-xl">
+            <button
+              type="button"
+              onClick={() => setTaskType("direct")}
+              className={`w-1/2 py-2 rounded-lg text-xs font-bold transition-all ${taskType === "direct" ? "neo-flat text-emerald-500" : "opacity-60"}`}
+            >
+              Direct Member Assign
+            </button>
+            <button
+              type="button"
+              onClick={() => setTaskType("floating")}
+              className={`w-1/2 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${taskType === "floating" ? "neo-flat text-teal-400" : "opacity-60"}`}
+            >
+              <Globe className="w-3 h-3" /> Floating Task
+            </button>
+          </div>
+
           <input
             type="text"
             required
@@ -636,19 +839,37 @@ export default function TasksPage() {
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
           />
 
-          <select
-            required
-            value={taskAssignee}
-            onChange={(e) => setTaskAssignee(e.target.value)}
-            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
-          >
-            <option value="" className="bg-[var(--bg-surface)]">-- Select Assignee Member --</option>
-            {members.map(m => (
-              <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
-                {m.full_name} ({m.domain} - {m.role})
-              </option>
-            ))}
-          </select>
+          {taskType === "direct" && (
+            <div className="space-y-2 border-l-2 border-emerald-500/40 pl-3">
+              <label className="text-[9px] font-extrabold uppercase opacity-60">1. Filter Domain</label>
+              <select
+                value={taskDomainFilter}
+                onChange={(e) => { setTaskDomainFilter(e.target.value); setTaskAssignee(""); }}
+                className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-bold cursor-pointer"
+              >
+                <option value="all" className="bg-[var(--bg-surface)]">All Domains</option>
+                <option value="technical" className="bg-[var(--bg-surface)]">Technical</option>
+                <option value="events" className="bg-[var(--bg-surface)]">Events</option>
+                <option value="creatives" className="bg-[var(--bg-surface)]">Creatives</option>
+                <option value="executive" className="bg-[var(--bg-surface)]">Executive</option>
+              </select>
+
+              <label className="text-[9px] font-extrabold uppercase opacity-60 pt-1 block">2. Select Member</label>
+              <select
+                required
+                value={taskAssignee}
+                onChange={(e) => setTaskAssignee(e.target.value)}
+                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
+              >
+                <option value="" className="bg-[var(--bg-surface)]">-- Select Assignee ({filterMembersByDomain(taskDomainFilter).length} available) --</option>
+                {filterMembersByDomain(taskDomainFilter).map(m => (
+                  <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
+                    {m.full_name} ({m.domain} - {m.role})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -688,12 +909,12 @@ export default function TasksPage() {
           />
 
           <button type="submit" disabled={creatingTask} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer">
-            {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckSquare className="w-4 h-4" /> Assign Task & Send Alert</>}
+            {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckSquare className="w-4 h-4" /> {taskType === "floating" ? "Publish Floating Task" : "Assign Task & Send Alert"}</>}
           </button>
         </form>
       )}
 
-      {/* TAB 5: Award Executive Bonus Points (With specialized options) */}
+      {/* TAB 6: Award Executive Bonus Points */}
       {activeTab === "bonus" && isExecutiveLead && (
         <form onSubmit={handleAwardBonus} className="neo-flat rounded-2xl p-6 max-w-xl space-y-4">
           <div className="flex items-center gap-2 text-amber-500">
@@ -702,19 +923,35 @@ export default function TasksPage() {
           </div>
           <p className="text-[10px] opacity-60">Grant extra points to any core member for exceptional initiative or standout contributions.</p>
 
-          <select
-            required
-            value={bonusMemberId}
-            onChange={(e) => setBonusMemberId(e.target.value)}
-            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium cursor-pointer"
-          >
-            <option value="" className="bg-[var(--bg-surface)]">-- Select Member for Bonus --</option>
-            {members.map(m => (
-              <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
-                {m.full_name} ({m.domain} - {m.role})
-              </option>
-            ))}
-          </select>
+          <div className="space-y-2 border-l-2 border-amber-500/40 pl-3">
+            <label className="text-[9px] font-extrabold uppercase opacity-60">1. Filter Domain</label>
+            <select
+              value={bonusDomainFilter}
+              onChange={(e) => { setBonusDomainFilter(e.target.value); setBonusMemberId(""); }}
+              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-bold cursor-pointer"
+            >
+              <option value="all" className="bg-[var(--bg-surface)]">All Domains</option>
+              <option value="technical" className="bg-[var(--bg-surface)]">Technical</option>
+              <option value="events" className="bg-[var(--bg-surface)]">Events</option>
+              <option value="creatives" className="bg-[var(--bg-surface)]">Creatives</option>
+              <option value="executive" className="bg-[var(--bg-surface)]">Executive</option>
+            </select>
+
+            <label className="text-[9px] font-extrabold uppercase opacity-60 pt-1 block">2. Select Member</label>
+            <select
+              required
+              value={bonusMemberId}
+              onChange={(e) => setBonusMemberId(e.target.value)}
+              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium cursor-pointer"
+            >
+              <option value="" className="bg-[var(--bg-surface)]">-- Select Member for Bonus --</option>
+              {filterMembersByDomain(bonusDomainFilter).map(m => (
+                <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
+                  {m.full_name} ({m.domain} - {m.role})
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div>
             <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Bonus Category & Points</label>
@@ -747,7 +984,7 @@ export default function TasksPage() {
         </form>
       )}
 
-      {/* TAB 6: Presidential Penalty / Point Deduction */}
+      {/* TAB 7: Presidential Penalty / Point Deduction */}
       {activeTab === "penalty" && isPresident && (
         <form onSubmit={handleIssuePenalty} className="neo-flat rounded-2xl p-6 max-w-xl space-y-4">
           <div className="flex items-center gap-2 text-rose-500">
@@ -756,19 +993,35 @@ export default function TasksPage() {
           </div>
           <p className="text-[10px] opacity-60">Deduct points from any member's ledger score for inactivity, policy violations, or unfulfilled responsibilities.</p>
 
-          <select
-            required
-            value={penaltyMemberId}
-            onChange={(e) => setPenaltyMemberId(e.target.value)}
-            className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-rose-500 font-medium cursor-pointer"
-          >
-            <option value="" className="bg-[var(--bg-surface)]">-- Select Member for Deduction --</option>
-            {members.map(m => (
-              <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
-                {m.full_name} ({m.domain} - {m.role})
-              </option>
-            ))}
-          </select>
+          <div className="space-y-2 border-l-2 border-rose-500/40 pl-3">
+            <label className="text-[9px] font-extrabold uppercase opacity-60">1. Filter Domain</label>
+            <select
+              value={penaltyDomainFilter}
+              onChange={(e) => { setPenaltyDomainFilter(e.target.value); setPenaltyMemberId(""); }}
+              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-bold cursor-pointer"
+            >
+              <option value="all" className="bg-[var(--bg-surface)]">All Domains</option>
+              <option value="technical" className="bg-[var(--bg-surface)]">Technical</option>
+              <option value="events" className="bg-[var(--bg-surface)]">Events</option>
+              <option value="creatives" className="bg-[var(--bg-surface)]">Creatives</option>
+              <option value="executive" className="bg-[var(--bg-surface)]">Executive</option>
+            </select>
+
+            <label className="text-[9px] font-extrabold uppercase opacity-60 pt-1 block">2. Select Member</label>
+            <select
+              required
+              value={penaltyMemberId}
+              onChange={(e) => setPenaltyMemberId(e.target.value)}
+              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-rose-500 font-medium cursor-pointer"
+            >
+              <option value="" className="bg-[var(--bg-surface)]">-- Select Member for Deduction --</option>
+              {filterMembersByDomain(penaltyDomainFilter).map(m => (
+                <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
+                  {m.full_name} ({m.domain} - {m.role})
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div>
             <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Points to Deduct</label>
@@ -805,19 +1058,36 @@ export default function TasksPage() {
             <h3 className="text-xs font-black uppercase tracking-widest text-amber-500">Re-assign Deliverable</h3>
             <p className="text-xs font-bold">{reassignTask.title}</p>
 
-            <select
-              required
-              value={newAssigneeId}
-              onChange={(e) => setNewAssigneeId(e.target.value)}
-              className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
-            >
-              <option value="" className="bg-[var(--bg-surface)]">-- Select New Member --</option>
-              {members.map(m => (
-                <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
-                  {m.full_name} ({m.domain})
-                </option>
-              ))}
-            </select>
+            <div className="space-y-2 border-l-2 border-amber-500/40 pl-3">
+              <label className="text-[9px] font-extrabold uppercase opacity-60">1. Filter Domain</label>
+              <select
+                value={reassignDomainFilter}
+                onChange={(e) => { setReassignDomainFilter(e.target.value); setNewAssigneeId(""); }}
+                className="w-full px-4 py-2 neo-pressed rounded-xl text-xs bg-transparent font-bold cursor-pointer"
+              >
+                <option value="all" className="bg-[var(--bg-surface)]">All Domains</option>
+                <option value="technical" className="bg-[var(--bg-surface)]">Technical</option>
+                <option value="events" className="bg-[var(--bg-surface)]">Events</option>
+                <option value="creatives" className="bg-[var(--bg-surface)]">Creatives</option>
+                <option value="executive" className="bg-[var(--bg-surface)]">Executive</option>
+              </select>
+
+              <label className="text-[9px] font-extrabold uppercase opacity-60 pt-1 block">2. Select Member or Make Floating</label>
+              <select
+                required
+                value={newAssigneeId}
+                onChange={(e) => setNewAssigneeId(e.target.value)}
+                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+              >
+                <option value="" className="bg-[var(--bg-surface)]">-- Select New Member --</option>
+                <option value="floating" className="bg-[var(--bg-surface)] font-bold text-teal-400">🌐 Make Floating Task (Unassigned)</option>
+                {filterMembersByDomain(reassignDomainFilter).map(m => (
+                  <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
+                    {m.full_name} ({m.domain})
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div className="flex gap-2 pt-2">
               <button
@@ -935,7 +1205,7 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* Custom Confirmation Dialog Modal for Task Deletion */}
+      {/* Custom Confirmation Modal */}
       {deleteModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
