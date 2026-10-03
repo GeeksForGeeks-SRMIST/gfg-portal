@@ -2,13 +2,29 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Trophy, Award, Medal, Crown, User, Filter, Search, Loader2 } from "lucide-react";
+import { 
+  Trophy, 
+  Crown, 
+  User, 
+  Search, 
+  Loader2, 
+  History, 
+  X, 
+  CheckCircle2, 
+  Sparkles, 
+  TrendingDown 
+} from "lucide-react";
 
 export default function LeaderboardPage() {
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedDomain, setSelectedDomain] = useState("all");
+
+  // Member Points History Modal State
+  const [selectedMember, setSelectedMember] = useState<any>(null);
+  const [memberLedger, setMemberLedger] = useState<any[]>([]);
+  const [loadingLedger, setLoadingLedger] = useState(false);
 
   const supabase = createClient();
 
@@ -53,6 +69,21 @@ export default function LeaderboardPage() {
     setLoading(false);
   }
 
+  // Fetch individual point history for any member
+  async function openMemberHistory(member: any) {
+    setSelectedMember(member);
+    setLoadingLedger(true);
+
+    const { data: history } = await supabase
+      .from("points_ledger")
+      .select("*")
+      .eq("profile_id", member.id)
+      .order("created_at", { ascending: false });
+
+    setMemberLedger(history || []);
+    setLoadingLedger(false);
+  }
+
   const filteredList = leaderboard.filter((m) => {
     const matchesSearch = m.full_name?.toLowerCase().includes(search.toLowerCase()) || 
                           m.domain?.toLowerCase().includes(search.toLowerCase());
@@ -94,13 +125,13 @@ export default function LeaderboardPage() {
           <select
             value={selectedDomain}
             onChange={(e) => setSelectedDomain(e.target.value)}
-            className="px-3 py-2 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium capitalize"
+            className="px-3 py-2 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium capitalize cursor-pointer"
           >
             <option value="all" className="bg-[var(--bg-surface)]">All Domains</option>
             <option value="technical" className="bg-[var(--bg-surface)]">Technical</option>
             <option value="events" className="bg-[var(--bg-surface)]">Events</option>
             <option value="creatives" className="bg-[var(--bg-surface)]">Creatives</option>
-            <option value="management" className="bg-[var(--bg-surface)]">Management</option>
+            <option value="executive" className="bg-[var(--bg-surface)]">Executive</option>
           </select>
         </div>
       </div>
@@ -135,12 +166,19 @@ export default function LeaderboardPage() {
                   <div className="neo-pressed px-4 py-1.5 rounded-xl">
                     <span className="text-xs font-mono font-black text-slate-300">{topThree[1].points} PTS</span>
                   </div>
+
+                  <button
+                    onClick={() => openMemberHistory(topThree[1])}
+                    className="mt-1 px-3 py-1.5 neo-btn rounded-xl text-[10px] font-bold text-slate-300 flex items-center gap-1.5 hover:scale-105 transition-all cursor-pointer"
+                  >
+                    <History className="w-3 h-3 text-slate-300" /> View History
+                  </button>
                 </div>
               )}
 
               {/* 1st Place (Crown Winner) */}
               {topThree[0] && (
-                <div className="neo-flat rounded-3xl p-6 flex flex-col items-center text-center space-y-3 relative order-1 md:order-2 border border-amber-500/40 bg-gradient-to-b from-amber-500/10 to-transparent">
+                <div className="neo-flat rounded-3xl p-6 flex flex-col items-center text-center space-y-3 relative order-1 md:order-2 border border-amber-500/40 bg-gradient-to-b from-amber-500/10 to-transparent shadow-xl">
                   <div className="absolute -top-4 w-10 h-10 rounded-full bg-amber-500 text-black font-black text-sm flex items-center justify-center shadow-lg">
                     <Crown className="w-5 h-5" />
                   </div>
@@ -158,6 +196,13 @@ export default function LeaderboardPage() {
                   <div className="neo-pressed px-5 py-2 rounded-xl">
                     <span className="text-sm font-mono font-black text-amber-400">{topThree[0].points} PTS</span>
                   </div>
+
+                  <button
+                    onClick={() => openMemberHistory(topThree[0])}
+                    className="mt-1 px-3.5 py-1.5 neo-btn rounded-xl text-[10px] font-bold text-amber-400 flex items-center gap-1.5 hover:scale-105 transition-all border border-amber-500/20 cursor-pointer"
+                  >
+                    <History className="w-3 h-3 text-amber-400" /> View History
+                  </button>
                 </div>
               )}
 
@@ -181,6 +226,13 @@ export default function LeaderboardPage() {
                   <div className="neo-pressed px-4 py-1.5 rounded-xl">
                     <span className="text-xs font-mono font-black text-amber-600">{topThree[2].points} PTS</span>
                   </div>
+
+                  <button
+                    onClick={() => openMemberHistory(topThree[2])}
+                    className="mt-1 px-3 py-1.5 neo-btn rounded-xl text-[10px] font-bold text-amber-600 flex items-center gap-1.5 hover:scale-105 transition-all cursor-pointer"
+                  >
+                    <History className="w-3 h-3 text-amber-600" /> View History
+                  </button>
                 </div>
               )}
 
@@ -197,13 +249,14 @@ export default function LeaderboardPage() {
                     <th className="p-4">Member</th>
                     <th className="p-4">Domain</th>
                     <th className="p-4">Role</th>
-                    <th className="p-4 text-right pr-6">Contribution Score</th>
+                    <th className="p-4 text-center">Contribution Score</th>
+                    <th className="p-4 text-right pr-6">Points Ledger</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--text-muted)]/10 font-medium">
                   {restOfList.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-8 text-center opacity-50">No members match the filter criteria.</td>
+                      <td colSpan={6} className="p-8 text-center opacity-50">No members match the filter criteria.</td>
                     </tr>
                   ) : (
                     restOfList.map((member, index) => {
@@ -233,8 +286,17 @@ export default function LeaderboardPage() {
                             {member.role?.replace("_", " ")}
                           </td>
 
-                          <td className="p-4 text-right pr-6 font-mono font-black text-emerald-500 text-sm">
+                          <td className="p-4 text-center font-mono font-black text-emerald-500 text-sm">
                             {member.points} PTS
+                          </td>
+
+                          <td className="p-4 text-right pr-6">
+                            <button
+                              onClick={() => openMemberHistory(member)}
+                              className="px-3 py-1.5 neo-btn rounded-xl text-[10px] font-bold text-emerald-500 inline-flex items-center gap-1.5 hover:scale-105 transition-all cursor-pointer"
+                            >
+                              <History className="w-3 h-3" /> History
+                            </button>
                           </td>
                         </tr>
                       );
@@ -245,6 +307,90 @@ export default function LeaderboardPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Member Points History Modal */}
+      {selectedMember && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[var(--text-muted)]/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full neo-pressed overflow-hidden flex items-center justify-center shrink-0 border border-emerald-500/30">
+                  {selectedMember.avatar_path ? (
+                    <img src={selectedMember.avatar_path} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-5 h-5 opacity-40" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-sm font-black">{selectedMember.full_name}</h3>
+                  <p className="text-[10px] uppercase font-bold text-emerald-500">{selectedMember.domain} • {selectedMember.role?.replace("_", " ")}</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSelectedMember(null)}
+                className="w-8 h-8 rounded-full neo-pressed flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Total Points Summary */}
+            <div className="neo-pressed p-4 rounded-2xl flex items-center justify-between">
+              <span className="text-xs font-bold opacity-60 uppercase tracking-wider">Total Accumulated Score</span>
+              <span className="text-base font-mono font-black text-emerald-500">{selectedMember.points} PTS</span>
+            </div>
+
+            {/* Ledger List */}
+            <div className="space-y-3 max-h-72 overflow-y-auto custom-scrollbar pr-1">
+              <p className="text-[10px] font-black uppercase tracking-widest opacity-50 px-1">Detailed Points Audit Trail</p>
+              
+              {loadingLedger ? (
+                <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin opacity-50 text-emerald-500" /></div>
+              ) : memberLedger.length === 0 ? (
+                <div className="p-6 text-center opacity-50 text-xs neo-pressed rounded-xl">No point transactions recorded for this member.</div>
+              ) : (
+                memberLedger.map((item) => {
+                  const isNegative = item.points_awarded < 0;
+                  const isBonus = item.reason?.includes("Executive Bonus");
+                  
+                  return (
+                    <div key={item.id} className="neo-pressed p-3.5 rounded-2xl flex items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          {isNegative ? (
+                            <TrendingDown className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                          ) : isBonus ? (
+                            <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          )}
+                          <p className="text-xs font-bold leading-tight">{item.reason}</p>
+                        </div>
+                        <p className="text-[9px] opacity-40 font-mono pl-5">{new Date(item.created_at).toLocaleString()}</p>
+                      </div>
+
+                      <span className={`text-xs font-mono font-black shrink-0 ${isNegative ? 'text-rose-500' : 'text-emerald-500'}`}>
+                        {isNegative ? `${item.points_awarded} PTS` : `+${item.points_awarded} PTS`}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <button
+              onClick={() => setSelectedMember(null)}
+              className="w-full py-3 neo-btn rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer mt-2"
+            >
+              Close
+            </button>
+
+          </div>
+        </div>
       )}
 
     </div>
