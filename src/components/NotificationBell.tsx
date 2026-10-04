@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
 
-// Robust Base64 to Uint8Array converter (Strips quotes and handles URL-safe characters)
 function urlBase64ToUint8Array(base64String: string) {
   const cleanKey = base64String.replace(/['"]/g, "").trim();
   const padding = "=".repeat((4 - (cleanKey.length % 4)) % 4);
@@ -24,8 +23,7 @@ export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   
-  // Notification state management
-  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null); // null = checking
+  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null);
   const [isIosBrowser, setIsIosBrowser] = useState(false);
   const [showAutoBanner, setShowAutoBanner] = useState(false);
   const [enabling, setEnabling] = useState(false);
@@ -52,7 +50,6 @@ export function NotificationBell() {
     }
     document.addEventListener("mousedown", handleClickOutside);
 
-    // Supabase Realtime: Updates UI badge and list when app is open
     const channel = supabase
       .channel("realtime_notifications")
       .on(
@@ -84,7 +81,7 @@ export function NotificationBell() {
       return;
     }
 
-    // 1. Check if user already has an active row in push_subscriptions table
+    // 1. Check if token exists in database
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       const { data: subs } = await supabase
@@ -100,13 +97,13 @@ export function NotificationBell() {
       }
     }
 
-    // 2. If native permission was granted earlier but token is missing from DB -> Auto-sync token
+    // 2. If browser granted permission previously but DB is missing token, attempt background sync
     if (Notification.permission === "granted") {
       await syncPushToken();
       return;
     }
 
-    // 3. Prompt banner for unconfigured users after 2 seconds
+    // 3. Show prompt banner for unconfigured devices
     setPushEnabled(false);
     const hasDismissed = localStorage.getItem("gfg_notif_banner_dismissed");
     if (!hasDismissed) {
@@ -114,13 +111,22 @@ export function NotificationBell() {
     }
   }
 
+  async function getServiceWorkerWithTimeout(): Promise<ServiceWorkerRegistration> {
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    
+    // Safety timeout: If navigator.serviceWorker.ready hangs, fail after 3 seconds instead of loading infinitely
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Service Worker activation timed out")), 3000)
+    );
+
+    return Promise.race([navigator.serviceWorker.ready, timeoutPromise]);
+  }
+
   async function syncPushToken() {
     try {
-      const reg = await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
-
+      const reg = await getServiceWorkerWithTimeout();
       const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!rawVapidKey) return;
+      if (!rawVapidKey) throw new Error("VAPID public key missing");
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
       let sub = await reg.pushManager.getSubscription();
@@ -149,15 +155,16 @@ export function NotificationBell() {
         if (!error) {
           setPushEnabled(true);
           setShowAutoBanner(false);
+          return true;
         } else {
           console.error("Database push sync error:", error.message);
-          setPushEnabled(false);
         }
       }
-    } catch (err) {
-      console.error("Failed to sync push token to Supabase:", err);
-      setPushEnabled(false);
+    } catch (err: any) {
+      console.error("Failed to sync push token:", err?.message || err);
     }
+    setPushEnabled(false);
+    return false;
   }
 
   async function requestPushPermission() {
@@ -174,31 +181,33 @@ export function NotificationBell() {
     setEnabling(true);
 
     try {
-      // 1. Request native browser permission if not granted
       let permission = Notification.permission;
       if (permission !== "granted") {
         permission = await Notification.requestPermission();
       }
       
       if (permission === "granted") {
-        await syncPushToken();
-
-        const reg = await navigator.serviceWorker.getRegistration();
-        if (reg) {
-          await reg.showNotification("Notifications Active! 🎉", {
-            body: "Mobile alerts configured and synced successfully.",
-            icon: "/gfg.png",
-            badge: "/gfg.png",
-            vibrate: [100, 50, 100],
-          } as NotificationOptions & { vibrate?: number[] });
+        const synced = await syncPushToken();
+        if (synced) {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg) {
+            await reg.showNotification("Notifications Active! 🎉", {
+              body: "Mobile alerts configured and synced successfully.",
+              icon: "/gfg.png",
+              badge: "/gfg.png",
+              vibrate: [100, 50, 100],
+            } as NotificationOptions & { vibrate?: number[] });
+          }
+        } else {
+          alert("Could not register device token in database. Please refresh and try again.");
         }
       } else {
-        alert("Notification permission was denied. You can enable it anytime in browser settings.");
+        alert("Notification permission was denied in browser settings.");
         setShowAutoBanner(false);
       }
     } catch (err: any) {
       console.error("Error enabling push notifications:", err);
-      alert(`Could not subscribe to notifications: ${err?.message || "Check VAPID keys"}`);
+      alert(`Could not subscribe: ${err?.message || "Check VAPID variables"}`);
     } finally {
       setEnabling(false);
     }
@@ -245,7 +254,6 @@ export function NotificationBell() {
 
   return (
     <>
-      {/* 1. Bell Icon & Dropdown */}
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setIsOpen(!isOpen)}
@@ -270,13 +278,12 @@ export function NotificationBell() {
               )}
             </div>
 
-            {/* Persistent State Display */}
             {pushEnabled === true ? (
               <div className="w-full py-2 px-3 neo-pressed rounded-xl text-[10px] font-bold text-emerald-500 flex items-center justify-center gap-2 opacity-90">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                 <span>Phone Push Alerts Active</span>
               </div>
-            ) : pushEnabled === false ? (
+            ) : (
               <button
                 onClick={requestPushPermission}
                 disabled={enabling}
@@ -285,7 +292,7 @@ export function NotificationBell() {
                 {enabling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Smartphone className="w-3.5 h-3.5" />}
                 <span>{isIosBrowser ? "Add to Home Screen for Alerts" : "Enable Mobile Alerts"}</span>
               </button>
-            ) : null}
+            )}
 
             <div className="max-h-72 overflow-y-auto custom-scrollbar space-y-2">
               {notifications.length === 0 ? (
@@ -323,8 +330,7 @@ export function NotificationBell() {
         )}
       </div>
 
-      {/* 2. Automatic First-Time Prompt Banner */}
-      {showAutoBanner && (
+      {showAutoBanner && pushEnabled === false && (
         <div className="fixed bottom-20 right-6 z-50 max-w-xs w-full p-4 neo-flat rounded-2xl bg-[var(--bg-base)] border border-emerald-500/40 shadow-2xl animate-in slide-in-from-bottom-5">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 text-emerald-500 font-extrabold text-xs">
