@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
 
+// Robust Base64 to Uint8Array converter
 function urlBase64ToUint8Array(base64String: string) {
   const cleanKey = base64String.replace(/['"]/g, "").trim();
   const padding = "=".repeat((4 - (cleanKey.length % 4)) % 4);
@@ -81,7 +82,6 @@ export function NotificationBell() {
       return;
     }
 
-    // 1. Check if token exists in database
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       const { data: subs } = await supabase
@@ -97,13 +97,11 @@ export function NotificationBell() {
       }
     }
 
-    // 2. If browser granted permission previously but DB is missing token, attempt background sync
     if (Notification.permission === "granted") {
       await syncPushToken();
       return;
     }
 
-    // 3. Show prompt banner for unconfigured devices
     setPushEnabled(false);
     const hasDismissed = localStorage.getItem("gfg_notif_banner_dismissed");
     if (!hasDismissed) {
@@ -111,44 +109,47 @@ export function NotificationBell() {
     }
   }
 
-  async function getServiceWorkerWithTimeout(): Promise<ServiceWorkerRegistration> {
-    const reg = await navigator.serviceWorker.register("/sw.js");
-    
-    // Safety timeout: If navigator.serviceWorker.ready hangs, fail after 3 seconds instead of loading infinitely
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Service Worker activation timed out")), 3000)
-    );
-
-    return Promise.race([navigator.serviceWorker.ready, timeoutPromise]);
+  // Wraps SW Ready with a 4-second timeout to prevent infinite hanging
+  async function getActiveServiceWorker() {
+    await navigator.serviceWorker.register("/sw.js");
+    return Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<ServiceWorkerRegistration>((_, reject) =>
+        setTimeout(() => reject(new Error("Service Worker activation timed out. Please refresh the page.")), 4000)
+      )
+    ]);
   }
 
   async function syncPushToken() {
     try {
-      const reg = await getServiceWorkerWithTimeout();
+      const reg = await getActiveServiceWorker();
       const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
       if (!rawVapidKey) throw new Error("VAPID public key missing");
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
-      let sub = await reg.pushManager.getSubscription();
-
+      
+      // Wrap subscribe with a timeout to prevent silent hanging
+      const subscribePromise = reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: convertedKey,
+      });
+      
+      const subTimeout = new Promise<PushSubscription>((_, reject) => 
+        setTimeout(() => reject(new Error("Push subscription timed out. The browser may be blocking it.")), 5000)
+      );
+      
+      let sub = await Promise.race([reg.pushManager.getSubscription(), subTimeout]);
+      
       if (!sub) {
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: convertedKey,
-        });
+        sub = await Promise.race([subscribePromise, subTimeout]);
       }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (user && sub) {
-        const subJson = sub.toJSON();
-
         const { error } = await supabase
           .from("push_subscriptions")
           .upsert(
-            {
-              user_id: user.id,
-              subscription_json: subJson,
-            },
+            { user_id: user.id, subscription_json: sub.toJSON() },
             { onConflict: "subscription_hash" }
           );
 
@@ -172,7 +173,6 @@ export function NotificationBell() {
       alert("On iOS, tap Share -> 'Add to Home Screen' first, then open the app from your Home Screen to enable notifications.");
       return;
     }
-
     if (!("Notification" in window) || !("serviceWorker" in navigator)) {
       alert("Push notifications are not supported on this browser.");
       return;
@@ -180,9 +180,17 @@ export function NotificationBell() {
 
     setEnabling(true);
 
+    // 🔴 WATCHDOG TIMER: Force stop loader after 8 seconds if browser hangs
+    const watchdog = setTimeout(() => {
+      setEnabling(false);
+      alert("The request is taking too long. Your phone/browser is blocking the permission prompt. Please clear site settings and try again.");
+    }, 8000);
+
     try {
       let permission = Notification.permission;
+      
       if (permission !== "granted") {
+        // Must be called immediately on user click
         permission = await Notification.requestPermission();
       }
       
@@ -196,19 +204,20 @@ export function NotificationBell() {
               icon: "/gfg.png",
               badge: "/gfg.png",
               vibrate: [100, 50, 100],
-            } as NotificationOptions & { vibrate?: number[] });
+            });
           }
         } else {
-          alert("Could not register device token in database. Please refresh and try again.");
+          alert("Could not save device token. Please refresh the page and try again.");
         }
       } else {
-        alert("Notification permission was denied in browser settings.");
+        alert("Notification permission was denied. You must enable it in your browser/phone settings.");
         setShowAutoBanner(false);
       }
     } catch (err: any) {
       console.error("Error enabling push notifications:", err);
       alert(`Could not subscribe: ${err?.message || "Check VAPID variables"}`);
     } finally {
+      clearTimeout(watchdog);
       setEnabling(false);
     }
   }
@@ -299,28 +308,15 @@ export function NotificationBell() {
                 <p className="text-xs opacity-50 text-center py-6">No recent notifications</p>
               ) : (
                 notifications.map((n) => (
-                  <div
-                    key={n.id}
-                    className={`p-3 neo-pressed rounded-2xl border-l-2 text-xs space-y-1 transition-all border-emerald-500 bg-emerald-500/5 ${n.type === "reminder" ? "border-amber-500" : ""}`}
-                  >
+                  <div key={n.id} className={`p-3 neo-pressed rounded-2xl border-l-2 text-xs space-y-1 transition-all border-emerald-500 bg-emerald-500/5 ${n.type === "reminder" ? "border-amber-500" : ""}`}>
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-bold leading-tight">{n.title}</p>
-                      <button
-                        onClick={() => deleteNotification(n.id)}
-                        title="Dismiss"
-                        className="p-1 neo-btn rounded-lg text-rose-500 hover:scale-110 transition-transform shrink-0 cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                      <button onClick={() => deleteNotification(n.id)} className="p-1 neo-btn rounded-lg text-rose-500 hover:scale-110 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                     </div>
                     <p className="opacity-80 text-[10px] leading-relaxed">{n.message}</p>
                     <div className="flex items-center justify-between pt-1 text-[8px] opacity-50 font-mono">
                       <span>{new Date(n.created_at).toLocaleDateString()}</span>
-                      {n.link && (
-                        <Link href={n.link} onClick={() => deleteNotification(n.id)} className="text-emerald-500 font-bold hover:underline flex items-center gap-0.5">
-                          View <ExternalLink className="w-2.5 h-2.5" />
-                        </Link>
-                      )}
+                      {n.link && <Link href={n.link} className="text-emerald-500 font-bold hover:underline flex items-center gap-0.5">View <ExternalLink className="w-2.5 h-2.5" /></Link>}
                     </div>
                   </div>
                 ))
@@ -337,27 +333,12 @@ export function NotificationBell() {
               <Smartphone className="w-4 h-4 animate-bounce" />
               <span>Enable Phone Alerts</span>
             </div>
-            <button onClick={dismissBanner} className="p-1 neo-btn rounded-lg opacity-60 hover:opacity-100 cursor-pointer">
-              <X className="w-3 h-3" />
-            </button>
+            <button onClick={dismissBanner} className="p-1 neo-btn rounded-lg opacity-60 hover:opacity-100 cursor-pointer"><X className="w-3 h-3" /></button>
           </div>
-
-          <p className="text-[10px] opacity-70 mt-1 leading-relaxed">
-            Get instant OS push alerts on your phone for chapter updates and notices.
-          </p>
-
+          <p className="text-[10px] opacity-70 mt-1 leading-relaxed">Get instant OS push alerts on your phone for chapter updates and notices.</p>
           <div className="flex gap-2 mt-3">
-            <button
-              onClick={dismissBanner}
-              className="w-1/3 py-2 neo-btn rounded-xl text-[9px] font-bold uppercase tracking-wider opacity-60 cursor-pointer"
-            >
-              Later
-            </button>
-            <button
-              onClick={requestPushPermission}
-              disabled={enabling}
-              className="w-2/3 py-2 neo-btn-green rounded-xl text-[9px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
-            >
+            <button onClick={dismissBanner} className="w-1/3 py-2 neo-btn rounded-xl text-[9px] font-bold uppercase tracking-wider opacity-60 cursor-pointer">Later</button>
+            <button onClick={requestPushPermission} disabled={enabling} className="w-2/3 py-2 neo-btn-green rounded-xl text-[9px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer">
               {enabling ? <Loader2 className="w-3 h-3 animate-spin" /> : "Enable (1 Tap)"}
             </button>
           </div>
