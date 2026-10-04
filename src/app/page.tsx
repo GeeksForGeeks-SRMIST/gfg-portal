@@ -3,81 +3,120 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { KeyRound, Mail, AlertCircle, Loader2, Clock, ArrowRight, Lock, ShieldCheck } from "lucide-react";
+import { KeyRound, Mail, AlertCircle, Loader2, Clock, ArrowRight, Lock, ShieldCheck, CheckCircle2 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import Link from "next/link";
 import Image from "next/image";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
-  const [aadhaarLast4, setAadhaarLast4] = useState("");
   const [password, setPassword] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [isResetMode, setIsResetMode] = useState(false);
+  
+  // Reset steps: "login" | "request_otp" | "verify_otp"
+  const [resetStep, setResetStep] = useState<"login" | "request_otp" | "verify_otp">("login");
   const [isPendingApproval, setIsPendingApproval] = useState(false);
 
   const router = useRouter();
   const supabase = createClient();
 
-  const handleAuth = async (e: React.FormEvent) => {
+  // ----------------------------------------------------
+  // 1. Send Resend OTP (/auth/send-otp)
+  // ----------------------------------------------------
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const res = await fetch("/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ srmEmail: email.trim() }),
+      });
+
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`Server returned status ${res.status}. Check server logs.`);
+      }
+
+      if (!res.ok) throw new Error(data.error || "Failed to send verification code.");
+
+      setMessage("Verification OTP sent to your SRM email address.");
+      setResetStep("verify_otp");
+    } catch (err: any) {
+      setError(err.message || "Failed to dispatch OTP email.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ----------------------------------------------------
+  // 2. Verify OTP & Reset Password (/auth/verify-otp)
+  // ----------------------------------------------------
+  const handleVerifyOtpAndReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const res = await fetch("/auth/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          srmEmail: email.trim(),
+          otpCode: otpCode.trim(),
+          newPassword,
+        }),
+      });
+
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`Server returned status ${res.status}. Check server logs.`);
+      }
+
+      if (!res.ok) throw new Error(data.error || "Failed to reset password.");
+
+      setMessage("Password updated successfully! You can now sign in with your new password.");
+      setResetStep("login");
+      setPassword("");
+      setNewPassword("");
+      setOtpCode("");
+    } catch (err: any) {
+      setError(err.message || "Failed to verify OTP or update password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ----------------------------------------------------
+  // 3. Standard Login Mode
+  // ----------------------------------------------------
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setMessage(null);
     setIsPendingApproval(false);
 
-    // ----------------------------------------------------
-    // Custom Identity-Verified Reset Mode (Using Aadhaar 4 digits)
-    // ----------------------------------------------------
-    if (isResetMode) {
-      if (!/^\d{4}$/.test(aadhaarLast4)) {
-        setError("Please enter exactly the last 4 digits of your Aadhaar.");
-        setLoading(false);
-        return;
-      }
+    const { data: authData, error: loginError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
 
-      try {
-        const res = await fetch("/api/admin-reset-password", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            srmEmail: email, 
-            aadhaarLast4: aadhaarLast4, 
-            newPassword 
-          }),
-        });
-
-        const text = await res.text();
-        let data: any = {};
-        try {
-          data = text ? JSON.parse(text) : {};
-        } catch (parseError) {
-          throw new Error("Server returned an invalid response.");
-        }
-
-        if (!res.ok) {
-          throw new Error(data.error || "Failed to update password.");
-        }
-
-        setMessage("Password updated successfully! You can now sign in.");
-        setIsResetMode(false);
-        setPassword("");
-        setNewPassword("");
-        setAadhaarLast4("");
-      } catch (err: any) {
-        setError(err.message || "Failed to verify identity or update password.");
-      }
-      setLoading(false);
-      return;
-    }
-
-    // ----------------------------------------------------
-    // Standard Login Mode
-    // ----------------------------------------------------
-    const { data: authData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
     if (loginError) {
       setError(loginError.message);
       setLoading(false);
@@ -98,7 +137,7 @@ export default function LoginPage() {
     }
 
     if (profile?.status === "rejected") {
-      setError("Your application was not approved by the admin team.");
+      setError("Your application was not approved by the executive board.");
       await supabase.auth.signOut();
       setLoading(false);
       return;
@@ -123,7 +162,13 @@ export default function LoginPage() {
             <Image src="/gfg.png" alt="GeeksforGeeks Logo" width={48} height={48} className="object-contain drop-shadow-sm" />
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-gradient">GeeksforGeeks</h1>
-          <p className="text-[10px] font-bold opacity-60 uppercase tracking-widest">SRMIST Core Portal</p>
+          <p className="text-[10px] font-bold opacity-60 uppercase tracking-widest">
+            {resetStep === "login"
+              ? "SRMIST Core Portal"
+              : resetStep === "request_otp"
+              ? "Request Password Reset OTP"
+              : "Verify OTP & Update Password"}
+          </p>
         </div>
 
         {isPendingApproval && (
@@ -137,34 +182,37 @@ export default function LoginPage() {
         )}
 
         {error && (
-          <div className="flex items-center gap-2 p-3 text-xs text-rose-500 rounded-xl neo-pressed animate-in slide-in-from-top-2">
+          <div className="flex items-center gap-2 p-3 text-xs text-rose-500 rounded-xl neo-pressed border border-rose-500/20 bg-rose-500/10 animate-in slide-in-from-top-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span className="font-medium">{error}</span>
           </div>
         )}
+
         {message && (
-          <div className="flex items-center gap-2 p-3 text-xs text-emerald-600 dark:text-emerald-400 rounded-xl neo-pressed animate-in slide-in-from-top-2">
+          <div className="flex items-center gap-2 p-3 text-xs text-emerald-600 dark:text-emerald-400 rounded-xl neo-pressed border border-emerald-500/20 bg-emerald-500/10 animate-in slide-in-from-top-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
             <span className="font-medium">{message}</span>
           </div>
         )}
 
-        <form onSubmit={handleAuth} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase tracking-widest opacity-60 px-1">SRM Mail ID</label>
-            <div className="relative group">
-              <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 group-focus-within:text-emerald-500 transition-colors" />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
-                placeholder="xx1234@srmist.edu.in"
-              />
+        {/* ---------------- LOGIN FORM ---------------- */}
+        {resetStep === "login" && (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-widest opacity-60 px-1">SRM Mail ID</label>
+              <div className="relative group">
+                <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 group-focus-within:text-emerald-500 transition-colors" />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
+                  placeholder="xx1234@srmist.edu.in"
+                />
+              </div>
             </div>
-          </div>
 
-          {!isResetMode ? (
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-widest opacity-60 px-1">Password</label>
               <div className="relative group">
@@ -179,62 +227,97 @@ export default function LoginPage() {
                 />
               </div>
             </div>
-          ) : (
-            <div className="space-y-4 animate-in fade-in">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase tracking-widest opacity-60 px-1">Identity Verification</label>
-                <div className="relative group">
-                  <ShieldCheck className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 group-focus-within:text-emerald-500 transition-colors" />
-                  <input
-                    type="text"
-                    required
-                    maxLength={4}
-                    pattern="\d{4}"
-                    title="Please enter exactly 4 digits"
-                    value={aadhaarLast4}
-                    onChange={(e) => setAadhaarLast4(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
-                    placeholder="Aadhaar Last 4 Digits (XXXX)"
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase tracking-widest opacity-60 px-1">New Password</label>
-                <div className="relative group">
-                  <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 group-focus-within:text-emerald-500 transition-colors" />
-                  <input
-                    type="password"
-                    required
-                    minLength={8}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
-                    placeholder="Min 8 characters"
-                  />
-                </div>
+            <button type="submit" disabled={loading} className="w-full py-3 px-4 rounded-xl neo-btn-green font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sign In"}
+            </button>
+          </form>
+        )}
+
+        {/* ---------------- REQUEST OTP FORM ---------------- */}
+        {resetStep === "request_otp" && (
+          <form onSubmit={handleSendOtp} className="space-y-4 animate-in fade-in">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-widest opacity-60 px-1">SRM Mail ID</label>
+              <div className="relative group">
+                <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 group-focus-within:text-emerald-500 transition-colors" />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
+                  placeholder="xx1234@srmist.edu.in"
+                />
               </div>
             </div>
-          )}
 
-          <button type="submit" disabled={loading} className="w-full py-3 px-4 rounded-xl neo-btn-green font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2">
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (isResetMode ? "Verify & Update Password" : "Sign In")}
-          </button>
-        </form>
+            <button type="submit" disabled={loading} className="w-full py-3 px-4 rounded-xl neo-btn-green font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send OTP to Mail"}
+            </button>
+          </form>
+        )}
+
+        {/* ---------------- VERIFY OTP & RESET FORM ---------------- */}
+        {resetStep === "verify_otp" && (
+          <form onSubmit={handleVerifyOtpAndReset} className="space-y-4 animate-in fade-in">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-widest opacity-60 px-1">6-Digit Verification OTP</label>
+              <div className="relative group">
+                <ShieldCheck className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 group-focus-within:text-emerald-500 transition-colors" />
+                <input
+                  type="text"
+                  required
+                  maxLength={6}
+                  pattern="\d{6}"
+                  title="Enter 6 digits"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
+                  placeholder="123456"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-widest opacity-60 px-1">New Password</label>
+              <div className="relative group">
+                <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 group-focus-within:text-emerald-500 transition-colors" />
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
+                  placeholder="Min 6 characters"
+                />
+              </div>
+            </div>
+
+            <button type="submit" disabled={loading} className="w-full py-3 px-4 rounded-xl neo-btn-green font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Verify & Set Password"}
+            </button>
+          </form>
+        )}
 
         <div className="flex flex-col gap-3 text-center pt-1 border-t border-[var(--text-muted)]/15">
-          <button 
-            type="button" 
-            onClick={() => { 
-              setIsResetMode(!isResetMode); 
-              setError(null); 
-              setMessage(null); 
-            }} 
-            className="text-[11px] font-bold opacity-60 hover:opacity-100 hover:text-emerald-500 transition-all"
+          <button
+            type="button"
+            onClick={() => {
+              if (resetStep === "login") {
+                setResetStep("request_otp");
+              } else {
+                setResetStep("login");
+              }
+              setError(null);
+              setMessage(null);
+            }}
+            className="text-[11px] font-bold opacity-60 hover:opacity-100 hover:text-emerald-500 transition-all cursor-pointer"
           >
-            {isResetMode ? "Back to Login" : "Forgot Password?"}
+            {resetStep === "login" ? "Forgot Password?" : "Back to Login"}
           </button>
-          
+
           <p className="text-[11px] font-medium opacity-70">
             New Core Member?{" "}
             <Link href="/signup" className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1">
