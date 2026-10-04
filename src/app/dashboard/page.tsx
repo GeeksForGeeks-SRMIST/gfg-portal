@@ -458,7 +458,7 @@ export default function DashboardOverview() {
             <div className="flex items-center justify-between px-1 shrink-0">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                 <CheckSquare className="w-4 h-4" />
-                <h3 className="text-xs font-extrabold uppercase tracking-widest">My Active Tasks & Deliverables</h3>
+                <h3 className="text-xs font-extrabold uppercase tracking-widest">My Active Tasks</h3>
               </div>
               <Link href="/dashboard/tasks" className="text-[10px] font-bold opacity-60 hover:text-emerald-500 flex items-center gap-1 transition-colors">
                 All Tasks <ChevronRight className="w-3 h-3" />
