@@ -3,6 +3,7 @@ import "@/app/globals.css";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
 import { GlobalAlert } from "@/components/GlobalAlert";
 import { Providers } from "@/components/Providers";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
   title: "GFG SRMIST Portal | Core Team",
@@ -40,6 +41,7 @@ export default function RootLayout({
       </head>
       <body className="antialiased bg-[var(--bg-base)] text-[var(--text-main)]">
         <Providers>
+          <ServiceWorkerRegister />
           {children}
           <PwaInstallPrompt />
           <GlobalAlert />

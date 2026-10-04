@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, X, Share, PlusSquare, Smartphone } from "lucide-react";
+import { Download, X, Share, PlusSquare } from "lucide-react";
 import Image from "next/image";
 
 export function PwaInstallPrompt() {
