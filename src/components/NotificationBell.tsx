@@ -5,9 +5,12 @@ import { createClient } from "@/lib/supabase/client";
 import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
 
+// Robust Base64 to Uint8Array converter (Strips quotes and handles URL-safe characters)
 function urlBase64ToUint8Array(base64String: string) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const cleanKey = base64String.replace(/['"]/g, "").trim();
+  const padding = "=".repeat((4 - (cleanKey.length % 4)) % 4);
+  const base64 = (cleanKey + padding).replace(/-/g, "+").replace(/_/g, "/");
+  
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -136,13 +139,13 @@ export function NotificationBell() {
         const reg = await navigator.serviceWorker.register("/sw.js");
         await navigator.serviceWorker.ready;
 
-        const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-        if (!vapidPublicKey) {
-          throw new Error("VAPID public key is missing from environment variables.");
+        const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+        if (!rawVapidKey) {
+          throw new Error("NEXT_PUBLIC_VAPID_PUBLIC_KEY is undefined in environment variables.");
         }
 
         // 2. Obtain or renew push subscription from browser PushManager
-        const convertedKey = urlBase64ToUint8Array(vapidPublicKey);
+        const convertedKey = urlBase64ToUint8Array(rawVapidKey);
         let sub = await reg.pushManager.getSubscription();
 
         if (!sub) {
@@ -185,7 +188,7 @@ export function NotificationBell() {
       }
     } catch (err: any) {
       console.error("Error enabling push notifications:", err);
-      alert("Could not subscribe to notifications. Please check VAPID variables and console logs.");
+      alert(`Could not subscribe to notifications: ${err?.message || "Check VAPID keys"}`);
     } finally {
       setEnabling(false);
     }
@@ -310,7 +313,7 @@ export function NotificationBell() {
         )}
       </div>
 
-      {/* 2. Automatic First-Time Prompt Banner (Triggers on load until enabled) */}
+      {/* 2. Automatic First-Time Prompt Banner */}
       {showAutoBanner && (
         <div className="fixed bottom-20 right-6 z-50 max-w-xs w-full p-4 neo-flat rounded-2xl bg-[var(--bg-base)] border border-emerald-500/40 shadow-2xl animate-in slide-in-from-bottom-5">
           <div className="flex items-start justify-between gap-2">
