@@ -78,20 +78,13 @@ export function NotificationBell() {
       return;
     }
 
-    // 1. Check native browser permission state first
-    if (Notification.permission === "granted") {
-      setPushEnabled(true);
-      setShowAutoBanner(false);
-      return;
-    }
-
     if (Notification.permission === "denied") {
       setPushEnabled(false);
       setShowAutoBanner(false);
       return;
     }
 
-    // 2. If permission is default, check user's multi-device subscriptions
+    // 1. Check if user already has an active row in push_subscriptions table
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       const { data: subs } = await supabase
@@ -107,11 +100,63 @@ export function NotificationBell() {
       }
     }
 
+    // 2. If native permission was granted earlier but token is missing from DB -> Auto-sync token
+    if (Notification.permission === "granted") {
+      await syncPushToken();
+      return;
+    }
+
     // 3. Prompt banner for unconfigured users after 2 seconds
     setPushEnabled(false);
     const hasDismissed = localStorage.getItem("gfg_notif_banner_dismissed");
     if (!hasDismissed) {
       setTimeout(() => setShowAutoBanner(true), 2000);
+    }
+  }
+
+  async function syncPushToken() {
+    try {
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+
+      const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!rawVapidKey) return;
+
+      const convertedKey = urlBase64ToUint8Array(rawVapidKey);
+      let sub = await reg.pushManager.getSubscription();
+
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: convertedKey,
+        });
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && sub) {
+        const subJson = sub.toJSON();
+
+        const { error } = await supabase
+          .from("push_subscriptions")
+          .upsert(
+            {
+              user_id: user.id,
+              subscription_json: subJson,
+            },
+            { onConflict: "subscription_hash" }
+          );
+
+        if (!error) {
+          setPushEnabled(true);
+          setShowAutoBanner(false);
+        } else {
+          console.error("Database push sync error:", error.message);
+          setPushEnabled(false);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to sync push token to Supabase:", err);
+      setPushEnabled(false);
     }
   }
 
@@ -129,59 +174,24 @@ export function NotificationBell() {
     setEnabling(true);
 
     try {
-      // 1. Request native browser permission if not already granted
+      // 1. Request native browser permission if not granted
       let permission = Notification.permission;
       if (permission !== "granted") {
         permission = await Notification.requestPermission();
       }
       
       if (permission === "granted") {
-        const reg = await navigator.serviceWorker.register("/sw.js");
-        await navigator.serviceWorker.ready;
+        await syncPushToken();
 
-        const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-        if (!rawVapidKey) {
-          throw new Error("NEXT_PUBLIC_VAPID_PUBLIC_KEY is undefined in environment variables.");
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          await reg.showNotification("Notifications Active! 🎉", {
+            body: "Mobile alerts configured and synced successfully.",
+            icon: "/gfg.png",
+            badge: "/gfg.png",
+            vibrate: [100, 50, 100],
+          } as NotificationOptions & { vibrate?: number[] });
         }
-
-        // 2. Obtain or renew push subscription from browser PushManager
-        const convertedKey = urlBase64ToUint8Array(rawVapidKey);
-        let sub = await reg.pushManager.getSubscription();
-
-        if (!sub) {
-          sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: convertedKey,
-          });
-        }
-
-        // 3. Upsert subscription into multi-device push_subscriptions table
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && sub) {
-          const { error: dbError } = await supabase
-            .from("push_subscriptions")
-            .upsert(
-              {
-                user_id: user.id,
-                subscription_json: sub.toJSON(),
-              },
-              { onConflict: "subscription_json" }
-            );
-
-          if (dbError) {
-            console.error("Failed to sync subscription to database:", dbError.message);
-          }
-        }
-
-        setPushEnabled(true);
-        setShowAutoBanner(false);
-
-        await reg.showNotification("Notifications Active! 🎉", {
-          body: "Mobile alerts configured and synced successfully.",
-          icon: "/gfg.png",
-          badge: "/gfg.png",
-          vibrate: [100, 50, 100],
-        } as NotificationOptions & { vibrate?: number[] });
       } else {
         alert("Notification permission was denied. You can enable it anytime in browser settings.");
         setShowAutoBanner(false);
