@@ -49,6 +49,7 @@ export function NotificationBell() {
     }
     document.addEventListener("mousedown", handleClickOutside);
 
+    // Supabase Realtime: Updates UI badge and list when app is open
     const channel = supabase
       .channel("realtime_notifications")
       .on(
@@ -58,19 +59,6 @@ export function NotificationBell() {
           const newNotif = payload.new;
           setNotifications((prev) => [newNotif, ...prev]);
           setUnreadCount((c) => c + 1);
-
-          if ("serviceWorker" in navigator && Notification.permission === "granted") {
-            const reg = await navigator.serviceWorker.getRegistration();
-            if (reg) {
-              reg.showNotification(newNotif.title, {
-                body: newNotif.message,
-                icon: "/gfg.png",
-                badge: "/gfg.png",
-                vibrate: [100, 50, 100],
-                data: { url: newNotif.link || "/dashboard" },
-              } as NotificationOptions & { vibrate?: number[] });
-            }
-          }
         }
       )
       .subscribe();
@@ -100,23 +88,23 @@ export function NotificationBell() {
       return;
     }
 
-    // 2. If permission is "default" (unasked), check database record
+    // 2. If permission is default, check user's multi-device subscriptions
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("push_subscription")
-        .eq("id", user.id)
-        .single();
+      const { data: subs } = await supabase
+        .from("push_subscriptions")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1);
 
-      if (profile?.push_subscription) {
+      if (subs && subs.length > 0) {
         setPushEnabled(true);
         setShowAutoBanner(false);
         return;
       }
     }
 
-    // 3. User has not configured notifications yet -> Show automatic prompt banner after 2s
+    // 3. Prompt banner for unconfigured users after 2 seconds
     setPushEnabled(false);
     const hasDismissed = localStorage.getItem("gfg_notif_banner_dismissed");
     if (!hasDismissed) {
@@ -138,38 +126,55 @@ export function NotificationBell() {
     setEnabling(true);
 
     try {
-      // Direct tap gesture triggers system permission request
-      const permission = await Notification.requestPermission();
+      // 1. Request native browser permission if not already granted
+      let permission = Notification.permission;
+      if (permission !== "granted") {
+        permission = await Notification.requestPermission();
+      }
       
       if (permission === "granted") {
         const reg = await navigator.serviceWorker.register("/sw.js");
         await navigator.serviceWorker.ready;
 
         const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+        if (!vapidPublicKey) {
+          throw new Error("VAPID public key is missing from environment variables.");
+        }
+
+        // 2. Obtain or renew push subscription from browser PushManager
+        const convertedKey = urlBase64ToUint8Array(vapidPublicKey);
         let sub = await reg.pushManager.getSubscription();
 
-        if (!sub && vapidPublicKey) {
-          const convertedKey = urlBase64ToUint8Array(vapidPublicKey);
+        if (!sub) {
           sub = await reg.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: convertedKey,
           });
         }
 
-        // Save subscription state permanently in Supabase
+        // 3. Upsert subscription into multi-device push_subscriptions table
         const { data: { user } } = await supabase.auth.getUser();
         if (user && sub) {
-          await supabase
-            .from("profiles")
-            .update({ push_subscription: sub.toJSON() })
-            .eq("id", user.id);
+          const { error: dbError } = await supabase
+            .from("push_subscriptions")
+            .upsert(
+              {
+                user_id: user.id,
+                subscription_json: sub.toJSON(),
+              },
+              { onConflict: "subscription_json" }
+            );
+
+          if (dbError) {
+            console.error("Failed to sync subscription to database:", dbError.message);
+          }
         }
 
         setPushEnabled(true);
         setShowAutoBanner(false);
 
         await reg.showNotification("Notifications Active! 🎉", {
-          body: "Mobile alerts configured successfully.",
+          body: "Mobile alerts configured and synced successfully.",
           icon: "/gfg.png",
           badge: "/gfg.png",
           vibrate: [100, 50, 100],
@@ -178,9 +183,9 @@ export function NotificationBell() {
         alert("Notification permission was denied. You can enable it anytime in browser settings.");
         setShowAutoBanner(false);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error enabling push notifications:", err);
-      alert("Could not subscribe to notifications. Please check VAPID variables.");
+      alert("Could not subscribe to notifications. Please check VAPID variables and console logs.");
     } finally {
       setEnabling(false);
     }
