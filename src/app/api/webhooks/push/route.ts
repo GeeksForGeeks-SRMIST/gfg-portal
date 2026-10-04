@@ -1,9 +1,7 @@
-// src/app/api/webhooks/push/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 
-// Configure Web Push with VAPID credentials
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
 
@@ -17,7 +15,7 @@ if (vapidPublicKey && vapidPrivateKey) {
 
 export async function POST(request: Request) {
   try {
-    // 1. Verify Webhook Secret (Checks both WEBHOOK_SECRET and NEXT_PUBLIC_WEBHOOK_SECRET)
+    // 1. Secret authorization check
     const authHeader = request.headers.get('authorization');
     const expectedSecret =
       process.env.WEBHOOK_SECRET || process.env.NEXT_PUBLIC_WEBHOOK_SECRET;
@@ -29,7 +27,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Parse payload safely (Handles both { record: { ... } } and flat { title, message, ... })
+    // 2. Parse request payload
     const body = await request.json();
     const record = body.record || body;
     const { title, message, link, target_user_id } = record;
@@ -56,7 +54,7 @@ export async function POST(request: Request) {
       auth: { persistSession: false },
     });
 
-    // 4. Fetch device subscriptions (Targeted user OR broadcast to everyone if null)
+    // 4. Query subscription rows
     let query = supabaseAdmin.from('push_subscriptions').select('*');
     if (target_user_id) {
       query = query.eq('user_id', target_user_id);
@@ -76,30 +74,36 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: true,
         sentToDevices: 0,
-        message: 'No active device subscriptions found.',
+        message: 'No active device subscriptions found in database.',
       });
     }
 
-    // 5. Dispatch Push Notifications in parallel
+    // 5. Send push notifications in parallel to all active devices
+    let successCount = 0;
     const pushPromises = subscriptions.map(async (sub) => {
       try {
+        // Ensure subscription_json is formatted as a valid object
+        const rawSub = sub.subscription_json;
+        const pushSubscription =
+          typeof rawSub === 'string' ? JSON.parse(rawSub) : rawSub;
+
         await webpush.sendNotification(
-          sub.subscription_json,
+          pushSubscription,
           JSON.stringify({
             title,
             message,
             link: link || '/dashboard',
           })
         );
+        successCount++;
       } catch (err: any) {
-        // Automatically prune expired or unregistered device tokens (410 Gone / 404 Not Found)
+        console.error(`Failed push to sub ID ${sub.id}:`, err.message || err);
+        // Clean up expired or invalid device subscriptions
         if (err.statusCode === 410 || err.statusCode === 404) {
           await supabaseAdmin
             .from('push_subscriptions')
             .delete()
             .eq('id', sub.id);
-        } else {
-          console.error(`Failed to send push to sub ID ${sub.id}:`, err.message);
         }
       }
     });
@@ -108,7 +112,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      sentToDevices: subscriptions.length,
+      sentToDevices: successCount,
+      totalDevicesFound: subscriptions.length,
     });
   } catch (error: any) {
     console.error('Push Webhook API Error:', error);
