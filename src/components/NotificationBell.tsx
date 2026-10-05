@@ -52,14 +52,15 @@ export function NotificationBell() {
     }
     document.addEventListener("mousedown", handleClickOutside);
 
+    // Realtime listener for newly inserted broadcast notices
     const channel = supabase
       .channel("realtime_notifications")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications" },
-        async (payload) => {
+        (payload) => {
           const newNotif = payload.new;
-          setNotifications((prev) => [newNotif, ...prev]);
+          setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
           setUnreadCount((c) => c + 1);
         }
       )
@@ -88,8 +89,7 @@ export function NotificationBell() {
       const { data: subs } = await supabase
         .from("push_subscriptions")
         .select("id")
-        .eq("user_id", user.id)
-        .limit(1);
+        .eq("user_id", user.id);
 
       if (subs && subs.length > 0) {
         setPushEnabled(true);
@@ -122,48 +122,41 @@ export function NotificationBell() {
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
 
-      const currentSub = await reg.pushManager.getSubscription();
-      let needsNewSub = true;
+      let currentSub = await reg.pushManager.getSubscription();
 
-      if (currentSub) {
-        try {
-          const subJson = currentSub.toJSON();
-          if (subJson.keys) {
-            needsNewSub = false;
-          } else {
-            await currentSub.unsubscribe();
-          }
-        } catch {
-          await currentSub.unsubscribe();
-        }
-      }
-
-      let finalSub: PushSubscription | null = currentSub;
-
-      if (needsNewSub || !finalSub) {
-        finalSub = await reg.pushManager.subscribe({
+      if (!currentSub) {
+        currentSub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: convertedKey,
         });
       }
 
-      if (!finalSub) {
+      if (!currentSub) {
         throw new Error("Push subscription could not be established.");
       }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const subJson = finalSub.toJSON();
+        const subJson = currentSub.toJSON();
 
-        // Delete any existing stale subscription records for this user before saving fresh sub
-        await supabase.from("push_subscriptions").delete().eq("user_id", user.id);
-
-        const { error: dbError } = await supabase
+        // 1. Check if THIS SPECIFIC DEVICE endpoint already exists
+        const { data: existingSub } = await supabase
           .from("push_subscriptions")
-          .insert({
+          .select("id")
+          .eq("user_id", user.id)
+          .filter("subscription_json->>endpoint", "eq", subJson.endpoint)
+          .maybeSingle();
+
+        let dbError = null;
+
+        if (!existingSub) {
+          // 2. Insert new device token WITHOUT deleting existing devices
+          const { error } = await supabase.from("push_subscriptions").insert({
             user_id: user.id,
             subscription_json: subJson,
           });
+          dbError = error;
+        }
 
         if (!dbError) {
           setPushEnabled(true);
@@ -229,12 +222,17 @@ export function NotificationBell() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("notifications")
       .select("*")
       .or(`target_user_id.is.null,target_user_id.eq.${user.id}`)
       .order("created_at", { ascending: false })
       .limit(10);
+
+    if (error) {
+      console.error("Error fetching notifications for bell list:", error.message);
+      return;
+    }
 
     setNotifications(data || []);
     setUnreadCount(data?.length || 0);
@@ -245,6 +243,8 @@ export function NotificationBell() {
     if (!error) {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
       setUnreadCount((prev) => Math.max(0, prev - 1));
+    } else {
+      console.error("Failed to delete notification:", error.message);
     }
   }
 
@@ -256,6 +256,8 @@ export function NotificationBell() {
     if (!error) {
       setUnreadCount(0);
       setNotifications([]);
+    } else {
+      console.error("Failed to clear notifications:", error.message);
     }
   }
 
@@ -268,7 +270,10 @@ export function NotificationBell() {
     <>
       <div className="relative" ref={dropdownRef}>
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => {
+            setIsOpen(!isOpen);
+            if (!isOpen) fetchNotifications();
+          }}
           className="p-2.5 neo-btn rounded-xl relative hover:text-emerald-500 transition-colors flex items-center justify-center cursor-pointer"
         >
           <Bell className="w-4 h-4"/>
@@ -293,7 +298,7 @@ export function NotificationBell() {
             {pushEnabled === true ? (
               <div className="w-full py-2 px-3 neo-pressed rounded-xl text-[10px] font-bold text-emerald-500 flex items-center justify-center gap-2 opacity-90">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500"/>
-                <span>Phone Push Alerts Active</span>
+                <span>Phone & Desktop Push Alerts Active</span>
               </div>
             ) : (
               <button
