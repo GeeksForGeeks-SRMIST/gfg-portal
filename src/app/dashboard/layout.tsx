@@ -25,6 +25,10 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { NotificationBell } from "@/components/NotificationBell";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
+import { UpdateNotifier } from "@/components/UpdateNotifier";
+import { GlobalAlert } from "@/components/GlobalAlert";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<any>(null);
@@ -81,7 +85,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="h-screen w-screen flex bg-[var(--bg-base)] text-[var(--text-main)] overflow-hidden font-sans">
-      
+      <ServiceWorkerRegister />
+      <UpdateNotifier />
+      <PwaInstallPrompt />
+      <GlobalAlert />
+
       {/* Desktop Sidebar Navigation */}
       <aside className="w-68 hidden md:flex flex-col justify-between p-4 m-3 mr-0 rounded-[2rem] neo-flat relative z-30 shrink-0 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         <div className="space-y-6">

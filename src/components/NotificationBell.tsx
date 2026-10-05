@@ -52,7 +52,7 @@ export function NotificationBell() {
     }
     document.addEventListener("mousedown", handleClickOutside);
 
-    // Realtime listener for newly inserted broadcast notices
+    // Real-time listener for live in-app notifications
     const channel = supabase
       .channel("realtime_notifications")
       .on(
@@ -139,19 +139,21 @@ export function NotificationBell() {
       if (user) {
         const subJson = currentSub.toJSON();
 
-        // 1. Query for existing device tokens without deleting active ones
+        // 1. Fetch all subscription records for this user
         const { data: existingSubs } = await supabase
           .from("push_subscriptions")
           .select("id, subscription_json")
           .eq("user_id", user.id);
 
-        const isAlreadyRegistered = existingSubs?.some(
+        // 2. Check if this specific device's endpoint is already stored
+        const alreadyExists = existingSubs?.some(
           (row: any) => row.subscription_json?.endpoint === subJson.endpoint
         );
 
         let dbError = null;
 
-        if (!isAlreadyRegistered) {
+        if (!alreadyExists) {
+          // 3. Insert as a NEW device row without deleting existing devices!
           const { error } = await supabase.from("push_subscriptions").insert({
             user_id: user.id,
             subscription_json: subJson,
@@ -231,7 +233,7 @@ export function NotificationBell() {
       .limit(10);
 
     if (error) {
-      console.error("Error fetching notifications for bell list:", error.message);
+      console.error("Error fetching bell notifications:", error.message);
       return;
     }
 
