@@ -88,6 +88,29 @@ export default function ComplaintsPage() {
     setLoading(false);
   }
 
+  // Helper function to trigger push webhook api route
+  async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/complaints") {
+    try {
+      await fetch("/api/webhooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+        },
+        body: JSON.stringify({
+          record: {
+            title,
+            message,
+            link,
+            target_user_id: targetUserId
+          }
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to trigger push webhook:", err);
+    }
+  }
+
   async function handleCreateComplaint(e: React.FormEvent) {
     e.preventDefault();
     if (!subject || !description) return;
@@ -133,13 +156,19 @@ export default function ComplaintsPage() {
     if (error) {
       setAlertModal({ isOpen: true, message: "Error updating complaint: " + error.message });
     } else {
+      const notifTitle = `⚠️ Complaint Status Updated: ${status}`;
+      const notifMsg = `Your grievance regarding "${complaint.subject}" is now set to ${status}.${notes ? ` Resolution details: "${notes}"` : ''}`;
+
       // Send real-time notification to the complaint author
       await supabase.from("notifications").insert({
-        title: `⚠️ Complaint Status Updated: ${status}`,
-        message: `Your grievance regarding "${complaint.subject}" is now set to ${status}.${notes ? ` Resolution details: "${notes}"` : ''}`,
+        title: notifTitle,
+        message: notifMsg,
         target_user_id: complaint.member_id,
         type: "notice"
       });
+
+      // Trigger push notification to the member's device
+      await triggerPushNotification(notifTitle, notifMsg, complaint.member_id);
 
       setAlertModal({ isOpen: true, message: "Status updated & member notified successfully." });
       setResolutionModal({ isOpen: false, complaint: null, status: "In Progress", notes: "" });

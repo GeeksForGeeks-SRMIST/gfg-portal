@@ -131,6 +131,29 @@ export default function TasksPage() {
     return getRoleRank(reviewerRole) < getRoleRank(submitterRole);
   };
 
+  // Helper function to trigger push webhook api route
+  async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/tasks") {
+    try {
+      await fetch("/api/webhooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+        },
+        body: JSON.stringify({
+          record: {
+            title,
+            message,
+            link,
+            target_user_id: targetUserId
+          }
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to trigger push webhook:", err);
+    }
+  }
+
   async function fetchPageData() {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -217,7 +240,6 @@ export default function TasksPage() {
   async function handleClaimTask(taskId: string) {
     setClaimingTaskId(taskId);
     
-    // Check current claims for floating task
     const { count } = await supabase
       .from("tasks")
       .select("*", { count: "exact", head: true })
@@ -230,7 +252,6 @@ export default function TasksPage() {
       return;
     }
 
-    // Create claimed task instance for individual user
     const { error } = await supabase.from("tasks").insert({
       title: parentTask.title,
       description: parentTask.description,
@@ -287,12 +308,17 @@ export default function TasksPage() {
       return;
     }
 
+    const notifTitle = `✨ Executive Bonus Awarded: +${finalPoints} PTS!`;
+    const notifMsg = `Reason: "${finalReason}" — Awarded by ${profile?.full_name}`;
+
     await supabase.from("notifications").insert({
-      title: `✨ Executive Bonus Awarded: +${finalPoints} PTS!`,
-      message: `Reason: "${finalReason}" — Awarded by ${profile?.full_name}`,
+      title: notifTitle,
+      message: notifMsg,
       target_user_id: bonusMemberId,
       type: "reminder"
     });
+
+    await triggerPushNotification(notifTitle, notifMsg, bonusMemberId);
 
     setBonusMemberId("");
     setBonusCategory("leadership");
@@ -321,12 +347,17 @@ export default function TasksPage() {
       return;
     }
 
+    const notifTitle = `⚠️ Points Deducted: ${deductionVal} PTS`;
+    const notifMsg = `Reason: "${penaltyReason}" — Issued by President ${profile?.full_name}`;
+
     await supabase.from("notifications").insert({
-      title: `⚠️ Points Deducted: ${deductionVal} PTS`,
-      message: `Reason: "${penaltyReason}" — Issued by President ${profile?.full_name}`,
+      title: notifTitle,
+      message: notifMsg,
       target_user_id: penaltyMemberId,
       type: "reminder"
     });
+
+    await triggerPushNotification(notifTitle, notifMsg, penaltyMemberId);
 
     setPenaltyMemberId("");
     setPenaltyPoints(10);
@@ -348,7 +379,6 @@ export default function TasksPage() {
     setCreatingTask(true);
 
     if (taskType === "direct") {
-      // Create individual direct task for each selected member
       const taskInserts = selectedAssignees.map((assigneeId) => ({
         title: taskTitle,
         description: taskDesc,
@@ -367,17 +397,20 @@ export default function TasksPage() {
         return;
       }
 
-      // Notify selected members
+      const notifTitle = `📋 New Task Assigned: ${taskTitle}`;
+      const notifMsg = `You were assigned a deliverable worth ${taskPoints} PTS by ${profile?.full_name}.`;
+
       for (const assigneeId of selectedAssignees) {
         await supabase.from("notifications").insert({
-          title: `📋 New Task Assigned: ${taskTitle}`,
-          message: `You were assigned a deliverable worth ${taskPoints} PTS by ${profile?.full_name}.`,
+          title: notifTitle,
+          message: notifMsg,
           target_user_id: assigneeId,
           type: "task"
         });
+
+        await triggerPushNotification(notifTitle, notifMsg, assigneeId);
       }
     } else {
-      // Create Floating Task with Max Claims limit
       const { error } = await supabase.from("tasks").insert({
         title: taskTitle,
         description: taskDesc,
@@ -395,12 +428,17 @@ export default function TasksPage() {
         return;
       }
 
+      const notifTitle = `🌐 New Floating Task Available: ${taskTitle}`;
+      const notifMsg = `An open deliverable worth ${taskPoints} PTS was created (Max ${maxClaims} claims). Claim yours now!`;
+
       await supabase.from("notifications").insert({
-        title: `🌐 New Floating Task Available: ${taskTitle}`,
-        message: `An open deliverable worth ${taskPoints} PTS was created (Max ${maxClaims} claims). Claim yours now!`,
+        title: notifTitle,
+        message: notifMsg,
         target_user_id: null,
         type: "notice"
       });
+
+      await triggerPushNotification(notifTitle, notifMsg, null);
     }
 
     setTaskTitle("");
@@ -433,19 +471,29 @@ export default function TasksPage() {
     await supabase.from("tasks").update({ assigned_to: targetAssignedTo }).eq("id", reassignTask.id);
 
     if (targetAssignedTo) {
+      const notifTitle = `📋 Task Re-assigned: ${reassignTask.title}`;
+      const notifMsg = `A deliverable was re-assigned to you by ${profile?.full_name}.`;
+
       await supabase.from("notifications").insert({
-        title: `📋 Task Re-assigned: ${reassignTask.title}`,
-        message: `A deliverable was re-assigned to you by ${profile?.full_name}.`,
+        title: notifTitle,
+        message: notifMsg,
         target_user_id: targetAssignedTo,
         type: "task"
       });
+
+      await triggerPushNotification(notifTitle, notifMsg, targetAssignedTo);
     } else {
+      const notifTitle = `🌐 Task Made Floating: ${reassignTask.title}`;
+      const notifMsg = `A deliverable is now unassigned and available for anyone to claim!`;
+
       await supabase.from("notifications").insert({
-        title: `🌐 Task Made Floating: ${reassignTask.title}`,
-        message: `A deliverable is now unassigned and available for anyone to claim!`,
+        title: notifTitle,
+        message: notifMsg,
         target_user_id: null,
         type: "notice"
       });
+
+      await triggerPushNotification(notifTitle, notifMsg, null);
     }
 
     setReassignTask(null);
@@ -503,12 +551,17 @@ export default function TasksPage() {
         reason: `Completed Task: ${submission.task?.title || 'Deliverable'}`
       });
 
+      const notifTitle = `🎉 Task Approved! +${submission.task?.points || 10} PTS`;
+      const notifMsg = `Your deliverable for "${submission.task?.title}" was approved by ${profile.full_name}.`;
+
       await supabase.from("notifications").insert({
-        title: `🎉 Task Approved! +${submission.task?.points || 10} PTS`,
-        message: `Your deliverable for "${submission.task?.title}" was approved by ${profile.full_name}.`,
+        title: notifTitle,
+        message: notifMsg,
         target_user_id: submission.member_id,
         type: "task"
       });
+
+      await triggerPushNotification(notifTitle, notifMsg, submission.member_id);
     }
 
     setReviewingSubmission(null);
@@ -521,10 +574,7 @@ export default function TasksPage() {
   const isPresident = profile?.role === 'president';
   const myTotalPoints = ledger.reduce((acc, item) => acc + item.points_awarded, 0);
 
-  // Filter Active Pending Tasks
   const activePendingTasks = tasks.filter(t => t.status !== "completed");
-  
-  // Categorize Tasks between My Assigned/Floating vs Other Chapter Members' Tasks
   const myDirectAndFloatingTasks = activePendingTasks.filter(t => t.assigned_to === profile?.id || t.assigned_to === null);
   const otherMembersTasks = activePendingTasks.filter(t => t.assigned_to !== profile?.id && t.assigned_to !== null);
 
@@ -699,7 +749,6 @@ export default function TasksPage() {
                         <span className="text-amber-500">{task.assigner?.full_name || "Executive Board"}</span>
                       </div>
 
-                      {/* Action 1: Floating Task -> Claim Button */}
                       {isFloating && (
                         <button
                           onClick={() => handleClaimTask(task.id)}
@@ -720,7 +769,6 @@ export default function TasksPage() {
                         </button>
                       )}
 
-                      {/* Action 2: Direct Task -> Submit Deliverable */}
                       {!isFloating && task.assigned_to === profile?.id && task.status === 'pending' && (
                         <button
                           onClick={() => setSelectedTask(task)}
@@ -730,7 +778,6 @@ export default function TasksPage() {
                         </button>
                       )}
 
-                      {/* Lead Control Actions */}
                       {isLead && (
                         <div className="flex items-center gap-2 pt-2">
                           <button
@@ -935,7 +982,6 @@ export default function TasksPage() {
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
           />
 
-          {/* Multi-Member Assignee Selection for Direct Tasks */}
           {taskType === "direct" && (
             <div className="space-y-2 border-l-2 border-emerald-500/40 pl-3">
               <label className="text-[9px] font-extrabold uppercase opacity-60">1. Filter Domain</label>
@@ -973,7 +1019,6 @@ export default function TasksPage() {
             </div>
           )}
 
-          {/* Floating Task Limit */}
           {taskType === "floating" && (
             <div className="space-y-1">
               <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Max Claim Limit (Capacity)</label>
@@ -1018,47 +1063,21 @@ export default function TasksPage() {
             </div>
           </div>
 
-          {/* Text Formatting Toolbar */}
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.5 p-1.5 neo-pressed rounded-xl border border-white/5">
-              <button
-                type="button"
-                onClick={() => applyFormatting("bold")}
-                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
-                title="Bold"
-              >
+              <button type="button" onClick={() => applyFormatting("bold")} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="Bold">
                 <Bold className="w-3.5 h-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => applyFormatting("italic")}
-                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
-                title="Italic"
-              >
+              <button type="button" onClick={() => applyFormatting("italic")} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="Italic">
                 <Italic className="w-3.5 h-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => applyFormatting("list")}
-                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
-                title="List"
-              >
+              <button type="button" onClick={() => applyFormatting("list")} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="List">
                 <List className="w-3.5 h-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => applyFormatting("code")}
-                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
-                title="Code"
-              >
+              <button type="button" onClick={() => applyFormatting("code")} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="Code">
                 <Code className="w-3.5 h-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => applyFormatting("link")}
-                className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold"
-                title="Link"
-              >
+              <button type="button" onClick={() => applyFormatting("link")} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="Link">
                 <LinkIcon className="w-3.5 h-3.5" />
               </button>
             </div>

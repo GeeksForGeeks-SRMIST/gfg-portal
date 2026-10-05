@@ -49,6 +49,29 @@ export default function ConfessionsPage() {
 
   const isExecutiveAdmin = ['president', 'secretary', 'joint_secretary'].includes(profile?.role);
 
+  // Helper function to trigger push webhook api route
+  async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/confessions") {
+    try {
+      await fetch("/api/webhooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+        },
+        body: JSON.stringify({
+          record: {
+            title,
+            message,
+            link,
+            target_user_id: targetUserId
+          }
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to trigger push webhook:", err);
+    }
+  }
+
   async function handleSubmitConfession(e: React.FormEvent) {
     e.preventDefault();
     if (!message.trim()) return;
@@ -80,6 +103,23 @@ export default function ConfessionsPage() {
     if (error) {
       setAlertModal({ isOpen: true, message: "Error updating status: " + error.message });
     } else {
+      if (status === "approved") {
+        const approvedConf = confessions.find(c => c.id === id);
+        const notifTitle = `💬 New Anonymous Confession (${approvedConf?.category || "General"})`;
+        const notifMsg = `"${approvedConf?.message ? (approvedConf.message.substring(0, 75) + "...") : "Check out the new confession on the feed!"}"`;
+
+        // Insert notification into DB for broadcast feed / notices
+        await supabase.from("notifications").insert({
+          title: notifTitle,
+          message: notifMsg,
+          target_user_id: null,
+          type: "notice"
+        });
+
+        // Trigger push notifications across all subscribed devices
+        await triggerPushNotification(notifTitle, notifMsg, null);
+      }
+
       fetchData();
     }
   }

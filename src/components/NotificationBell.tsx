@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
 
-// Robust Base64 to Uint8Array converter
 function urlBase64ToUint8Array(base64String: string) {
   const cleanKey = base64String.replace(/['"]/g, "").trim();
   const padding = "=".repeat((4 - (cleanKey.length % 4)) % 4);
@@ -109,13 +108,12 @@ export function NotificationBell() {
     }
   }
 
-  // Wraps SW Ready with a 4-second timeout to prevent infinite hanging
   async function getActiveServiceWorker() {
     await navigator.serviceWorker.register("/sw.js");
     return Promise.race([
       navigator.serviceWorker.ready,
       new Promise<ServiceWorkerRegistration>((_, reject) =>
-        setTimeout(() => reject(new Error("Service Worker activation timed out. Please refresh the page.")), 4000)
+        setTimeout(() => reject(new Error("Service Worker activation timed out.")), 4000)
       )
     ]);
   }
@@ -128,14 +126,13 @@ export function NotificationBell() {
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
       
-      // Wrap subscribe with a timeout to prevent silent hanging
       const subscribePromise = reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: convertedKey,
       });
       
       const subTimeout = new Promise<PushSubscription>((_, reject) => 
-        setTimeout(() => reject(new Error("Push subscription timed out. The browser may be blocking it.")), 5000)
+        setTimeout(() => reject(new Error("Push subscription timed out.")), 5000)
       );
       
       let sub = await Promise.race([reg.pushManager.getSubscription(), subTimeout]);
@@ -170,7 +167,7 @@ export function NotificationBell() {
 
   async function requestPushPermission() {
     if (isIosBrowser) {
-      alert("On iOS, tap Share -> 'Add to Home Screen' first, then open the app from your Home Screen to enable notifications.");
+      alert("On iOS, tap Share -> 'Add to Home Screen' first, then open the app from your Home Screen.");
       return;
     }
     if (!("Notification" in window) || !("serviceWorker" in navigator)) {
@@ -180,17 +177,14 @@ export function NotificationBell() {
 
     setEnabling(true);
 
-    // 🔴 WATCHDOG TIMER: Force stop loader after 8 seconds if browser hangs
     const watchdog = setTimeout(() => {
       setEnabling(false);
-      alert("The request is taking too long. Your phone/browser is blocking the permission prompt. Please clear site settings and try again.");
+      alert("The request took too long. Your browser may be blocking notifications. Check site settings.");
     }, 8000);
 
     try {
       let permission = Notification.permission;
-      
       if (permission !== "granted") {
-        // Must be called immediately on user click
         permission = await Notification.requestPermission();
       }
       
@@ -207,10 +201,10 @@ export function NotificationBell() {
             });
           }
         } else {
-          alert("Could not save device token. Please refresh the page and try again.");
+          alert("Could not save device token. Please refresh the page.");
         }
       } else {
-        alert("Notification permission was denied. You must enable it in your browser/phone settings.");
+        alert("Notification permission was denied in browser settings.");
         setShowAutoBanner(false);
       }
     } catch (err: any) {

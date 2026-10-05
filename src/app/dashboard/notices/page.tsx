@@ -138,7 +138,7 @@ export default function NoticesPage() {
     if (!title || !content || !isLead) return;
     setIsPublishing(true);
 
-    // 1. Insert Notice
+    // 1. Insert Notice into Database
     await supabase.from("notices").insert({
       title,
       content,
@@ -146,12 +146,36 @@ export default function NoticesPage() {
       author_id: profile?.id
     });
 
-    // 2. Send Real-Time Broadcast Notification
+    const broadcastTitle = `${isImportant ? '🚨' : '📢'} New Notice: ${title}`;
+    const broadcastMessage = content.substring(0, 100) + "...";
+
+    // 2. Insert into Bell Notification History
     await supabase.from("notifications").insert({
-      title: `${isImportant ? '🚨' : '📢'} New Notice: ${title}`,
-      message: content.substring(0, 100) + "...",
+      title: broadcastTitle,
+      message: broadcastMessage,
       type: isImportant ? "urgent" : "notice"
     });
+
+    // 3. EXPLICITLY CALL PUSH WEBHOOK TO WAKE UP DEVICES ACROSS OS
+    try {
+      await fetch("/api/webhooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+        },
+        body: JSON.stringify({
+          record: {
+            title: broadcastTitle,
+            message: broadcastMessage,
+            link: "/dashboard/notices",
+            target_user_id: null
+          }
+        }),
+      });
+    } catch (pushErr) {
+      console.error("Failed to trigger push webhook:", pushErr);
+    }
 
     setTitle("");
     setContent("");
@@ -178,14 +202,40 @@ export default function NoticesPage() {
   }
 
   async function handleSendReminder(notice: any) {
+    const reminderTitle = `⏰ REMINDER: ${notice.title}`;
+    const reminderMessage = `Important reminder regarding notice published on ${new Date(notice.created_at).toLocaleDateString()}`;
+
+    // 1. Insert into Bell Notification History
     await supabase.from("notifications").insert({
-      title: `⏰ REMINDER: ${notice.title}`,
-      message: `Important reminder regarding notice published on ${new Date(notice.created_at).toLocaleDateString()}`,
+      title: reminderTitle,
+      message: reminderMessage,
       type: "reminder"
     });
+
+    // 2. EXPLICITLY CALL PUSH WEBHOOK FOR REMINDER
+    try {
+      await fetch("/api/webhooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+        },
+        body: JSON.stringify({
+          record: {
+            title: reminderTitle,
+            message: reminderMessage,
+            link: "/dashboard/notices",
+            target_user_id: null
+          }
+        }),
+      });
+    } catch (pushErr) {
+      console.error("Failed to trigger push reminder:", pushErr);
+    }
+
     setAlertModal({
       isOpen: true,
-      message: `Real-time reminder sent to all members for: "${notice.title}"`
+      message: `Real-time push reminder sent to all members for: "${notice.title}"`
     });
   }
 

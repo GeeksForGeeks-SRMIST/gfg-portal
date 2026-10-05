@@ -105,6 +105,29 @@ export default function MemoriesPage() {
     setLoading(false);
   }
 
+  // Helper function to trigger push webhook api route
+  async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/memories") {
+    try {
+      await fetch("/api/webhooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+        },
+        body: JSON.stringify({
+          record: {
+            title,
+            message,
+            link,
+            target_user_id: targetUserId
+          }
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to trigger push webhook:", err);
+    }
+  }
+
   // Toggle Reaction with Real-time Sync
   async function handleToggleReaction(memoryId: string, emoji: string) {
     if (!profile?.id) return;
@@ -193,13 +216,19 @@ export default function MemoriesPage() {
     if (error) {
       setAlertModal({ isOpen: true, message: "Failed to share memory: " + error.message });
     } else {
+      const notifTitle = `📸 New Club Memory: ${eventTitle}`;
+      const notifMsg = `${profile?.full_name || 'A team member'} posted a new story highlight! Check it out in the Memories feed.`;
+
       // 2. Send Broadcast Notification to Entire Team (target_user_id = null)
       await supabase.from("notifications").insert({
-        title: `📸 New Club Memory: ${eventTitle}`,
-        message: `${profile?.full_name || 'A team member'} posted a new story highlight! Check it out in the Memories feed.`,
+        title: notifTitle,
+        message: notifMsg,
         target_user_id: null,
         type: "notice"
       });
+
+      // 3. Trigger push webhook broadcast across devices
+      await triggerPushNotification(notifTitle, notifMsg, null);
 
       setEventTitle("");
       setDescription("");
