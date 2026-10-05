@@ -152,12 +152,16 @@ export default function NoticesPage() {
 
     // 2. Trigger Real-time Bell & OS Push via Server Action
     try {
-      await sendNotification({
+      const res = await sendNotification({
         title: broadcastTitle,
         message: broadcastMessage,
         link: "/dashboard/notices",
-        target_user_id: null // Broadcast to all
+        target_user_id: null
       });
+
+      if (!res.success) {
+        console.warn("Push notification warning:", res.error);
+      }
     } catch (pushErr) {
       console.error("Failed to trigger push notification:", pushErr);
     }
@@ -190,22 +194,31 @@ export default function NoticesPage() {
     const reminderTitle = `⏰ REMINDER: ${notice.title}`;
     const reminderMessage = `Important reminder regarding notice published on ${new Date(notice.created_at).toLocaleDateString()}`;
 
-    // Trigger Real-time Bell & OS Push via Server Action
     try {
-      await sendNotification({
+      const res = await sendNotification({
         title: reminderTitle,
         message: reminderMessage,
         link: "/dashboard/notices",
         target_user_id: null
       });
-    } catch (pushErr) {
-      console.error("Failed to trigger push reminder:", pushErr);
-    }
 
-    setAlertModal({
-      isOpen: true,
-      message: `Real-time push reminder sent to all members for: "${notice.title}"`
-    });
+      if (res.success) {
+        setAlertModal({
+          isOpen: true,
+          message: `Push alert dispatched to ${res.count ?? 0} active device(s)!`
+        });
+      } else {
+        setAlertModal({
+          isOpen: true,
+          message: `In-app notice updated, but push alert failed: ${res.error}`
+        });
+      }
+    } catch (pushErr: any) {
+      setAlertModal({
+        isOpen: true,
+        message: `Error dispatching reminder: ${pushErr?.message || pushErr}`
+      });
+    }
   }
 
   return (
@@ -262,7 +275,6 @@ export default function NoticesPage() {
           ) : (
             notices.map((notice) => (
               <div key={notice.id} className="neo-flat rounded-3xl p-6 flex flex-col gap-4 relative overflow-hidden transition-all border border-white/5">
-                {/* Left urgency indicator bar */}
                 <div className={`absolute top-0 left-0 w-2 h-full ${notice.is_important ? 'bg-gradient-to-b from-rose-500 to-amber-500' : 'bg-emerald-500'}`} />
                 
                 <div className="space-y-3 pl-3">
@@ -287,13 +299,11 @@ export default function NoticesPage() {
                     </span>
                   </div>
 
-                  {/* Notice Content */}
                   <div className="text-xs opacity-90 space-y-1.5 font-medium leading-relaxed">
                     {renderFormattedContent(notice.content)}
                   </div>
                 </div>
 
-                {/* Footer Metadata & Actions */}
                 <div className="pt-3 border-t border-[var(--text-muted)]/10 flex items-center justify-between pl-3">
                   <p className="text-[9px] font-extrabold text-emerald-500 uppercase tracking-widest">
                     Posted by {notice.author?.full_name || "Executive Lead"} • {notice.author?.role?.replace("_", " ")}
@@ -345,7 +355,6 @@ export default function NoticesPage() {
                 <Sparkles className="w-5 h-5 text-emerald-500 opacity-60"/>
               </div>
               
-              {/* Heading */}
               <div className="space-y-1">
                 <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Heading / Subject *</label>
                 <input
@@ -358,12 +367,10 @@ export default function NoticesPage() {
                 />
               </div>
 
-              {/* Notice Content & Formatting Bar */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between px-1">
                   <label className="text-[9px] font-extrabold uppercase opacity-60">Description & Links *</label>
                   
-                  {/* Text Formatting Toolbar */}
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -411,7 +418,6 @@ export default function NoticesPage() {
                 />
               </div>
 
-              {/* High Priority Toggle */}
               <label className="flex items-center gap-2 cursor-pointer pt-1">
                 <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} className="peer sr-only" />
                 <div className="w-5 h-5 neo-pressed rounded-md flex items-center justify-center peer-checked:text-rose-500 transition-colors shrink-0">
@@ -476,7 +482,7 @@ export default function NoticesPage() {
               <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 text-emerald-500">
                 <CheckCircle2 className="w-5 h-5"/>
               </div>
-              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Reminder Dispatched</h3>
+              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Server Action Output</h3>
             </div>
 
             <p className="text-xs opacity-80 leading-relaxed px-1 text-[var(--text-main)]">{alertModal.message}</p>

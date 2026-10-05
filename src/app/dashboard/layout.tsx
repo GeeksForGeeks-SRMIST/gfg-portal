@@ -125,7 +125,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <NavLink href="/dashboard/complaints" icon={<AlertOctagon size={16} strokeWidth={2.5} />} label="Complaints" currentPath={pathname} />
             )}
 
-            {/* Dynamic Team Link: Manage Team for Leads, Explore Team for Members */}
             {isExecutiveLead ? (
               <NavLink href="/dashboard/admin" icon={<Shield size={16} strokeWidth={2.5} />} label="Manage Team" currentPath={pathname} />
             ) : (
@@ -160,7 +159,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <form action="/auth/signout" method="post">
             <button 
               type="submit" 
-              className="w-full py-2.5 px-3 rounded-xl neo-btn font-black text-[9px] uppercase tracking-wider flex items-center justify-center gap-1.5 text-rose-500 hover:bg-rose-500/10 transition-colors"
+              className="w-full py-2.5 px-3 rounded-xl neo-btn font-black text-[9px] uppercase tracking-wider flex items-center justify-center gap-1.5 text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
             >
               <LogOut size={12} strokeWidth={2.5} /> Sign Out
             </button>
@@ -187,7 +186,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
                 <button 
                   onClick={() => setMobileMenuOpen(false)}
-                  className="p-2 rounded-xl neo-btn text-rose-500"
+                  className="p-2 rounded-xl neo-btn text-rose-500 cursor-pointer"
                 >
                   <X size={18} />
                 </button>
@@ -250,7 +249,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <form action="/auth/signout" method="post">
                 <button 
                   type="submit" 
-                  className="w-full py-2.5 px-3 rounded-xl neo-btn font-black text-[9px] uppercase tracking-wider flex items-center justify-center gap-1.5 text-rose-500 hover:bg-rose-500/10 transition-colors"
+                  className="w-full py-2.5 px-3 rounded-xl neo-btn font-black text-[9px] uppercase tracking-wider flex items-center justify-center gap-1.5 text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
                 >
                   <LogOut size={12} strokeWidth={2.5} /> Sign Out
                 </button>
