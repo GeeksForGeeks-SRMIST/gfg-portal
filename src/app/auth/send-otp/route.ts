@@ -18,10 +18,18 @@ export async function POST(request: Request) {
     const smtpEmail = process.env.SMTP_EMAIL;
     const smtpPassword = process.env.SMTP_PASSWORD;
 
+    // DIAGNOSTIC CHECK: Let's see precisely what is missing on Vercel
     if (!supabaseUrl || !serviceRoleKey || !smtpEmail || !smtpPassword) {
-      console.error("Missing server configuration environment variables.");
+      const missing = [];
+      if (!supabaseUrl) missing.push("NEXT_PUBLIC_SUPABASE_URL");
+      if (!serviceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+      if (!smtpEmail) missing.push("SMTP_EMAIL");
+      if (!smtpPassword) missing.push("SMTP_PASSWORD");
+
+      console.error("Vercel Environment Failure. Missing variables:", missing);
+      
       return NextResponse.json(
-        { error: "Server configuration error. Missing SMTP credentials." },
+        { error: `Server config error. Missing: ${missing.join(", ")}` },
         { status: 500 }
       );
     }
@@ -78,7 +86,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 4. Create Nodemailer Transport with explicit settings for Vercel stability
+    // 4. Create Nodemailer Transport with explicit settings
     const transporter = nodemailer.createTransport({
       host: "smtp.gmail.com",
       port: 465,
@@ -89,7 +97,7 @@ export async function POST(request: Request) {
       },
     });
 
-    // 5. Explicitly AWAIT mail delivery so Vercel doesn't kill execution early
+    // 5. Send OTP Email
     await transporter.sendMail({
       from: `"GFS SRMIST Core Portal" <${smtpEmail}>`,
       to: srmEmail.trim(),
