@@ -139,18 +139,19 @@ export function NotificationBell() {
       if (user) {
         const subJson = currentSub.toJSON();
 
-        // 1. Check if THIS SPECIFIC DEVICE endpoint already exists
-        const { data: existingSub } = await supabase
+        // 1. Query for existing device tokens without deleting active ones
+        const { data: existingSubs } = await supabase
           .from("push_subscriptions")
-          .select("id")
-          .eq("user_id", user.id)
-          .filter("subscription_json->>endpoint", "eq", subJson.endpoint)
-          .maybeSingle();
+          .select("id, subscription_json")
+          .eq("user_id", user.id);
+
+        const isAlreadyRegistered = existingSubs?.some(
+          (row: any) => row.subscription_json?.endpoint === subJson.endpoint
+        );
 
         let dbError = null;
 
-        if (!existingSub) {
-          // 2. Insert new device token WITHOUT deleting existing devices
+        if (!isAlreadyRegistered) {
           const { error } = await supabase.from("push_subscriptions").insert({
             user_id: user.id,
             subscription_json: subJson,
@@ -298,7 +299,7 @@ export function NotificationBell() {
             {pushEnabled === true ? (
               <div className="w-full py-2 px-3 neo-pressed rounded-xl text-[10px] font-bold text-emerald-500 flex items-center justify-center gap-2 opacity-90">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500"/>
-                <span>Phone & Desktop Push Alerts Active</span>
+                <span>Push Alerts Active on this device</span>
               </div>
             ) : (
               <button
