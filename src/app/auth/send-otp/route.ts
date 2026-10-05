@@ -78,16 +78,18 @@ export async function POST(request: Request) {
       );
     }
 
-    // 4. Create Nodemailer Transport
+    // 4. Create Nodemailer Transport with explicit settings for Vercel stability
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
       auth: {
         user: smtpEmail,
         pass: smtpPassword,
       },
     });
 
-    // 5. Send OTP Email
+    // 5. Explicitly AWAIT mail delivery so Vercel doesn't kill execution early
     await transporter.sendMail({
       from: `"GFS SRMIST Core Portal" <${smtpEmail}>`,
       to: srmEmail.trim(),
