@@ -1,5 +1,3 @@
-// public/sw.js
-
 // 1. Immediately activate updated service worker without waiting
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -14,7 +12,7 @@ self.addEventListener("push", (event) => {
   let data = {
     title: "GeeksforGeeks SRMIST",
     message: "New alert received!",
-    link: "/dashboard",
+    link: "/dashboard/notices",
   };
 
   if (event.data) {
@@ -34,7 +32,10 @@ self.addEventListener("push", (event) => {
     body: data.message,
     icon: "/gfg.png",
     badge: "/gfg.png",
-    vibrate: [100, 50, 100],
+    vibrate: [200, 100, 200, 100, 200],
+    tag: "gfg-notice-broadcast",
+    renotify: true,
+    requireInteraction: false,
     data: {
       url: data.link,
     },
@@ -50,7 +51,7 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   const targetUrl = new URL(
-    event.notification.data?.url || "/dashboard",
+    event.notification.data?.url || "/dashboard/notices",
     self.location.origin
   ).href;
 

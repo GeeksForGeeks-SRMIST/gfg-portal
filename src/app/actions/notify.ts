@@ -12,7 +12,7 @@ if (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   );
 }
 
-export async function sendNotificationToAll(title: string, message: string, link: string = "/dashboard") {
+export async function sendNotificationToAll(title: string, message: string, link: string = "/dashboard/notices") {
   const supabase = await createClient();
 
   // 2. Verify caller user session
@@ -22,7 +22,7 @@ export async function sendNotificationToAll(title: string, message: string, link
   }
 
   // 3. Insert notification record for in-app bell dropdown history
-  const { error: notifErr } = await supabase
+  const { data: newNotif, error: notifErr } = await supabase
     .from("notifications")
     .insert([
       {
@@ -32,7 +32,9 @@ export async function sendNotificationToAll(title: string, message: string, link
         type: "announcement",
         target_user_id: null, // Broadcast to all core team members
       },
-    ]);
+    ])
+    .select()
+    .single();
 
   if (notifErr) {
     console.error("Failed to store in-app notification record in DB:", notifErr.message);
@@ -52,6 +54,7 @@ export async function sendNotificationToAll(title: string, message: string, link
     return {
       success: true,
       count: 0,
+      notif: newNotif,
       message: "Notice saved to DB, but no active device subscriptions were found in 'push_subscriptions'.",
     };
   }
@@ -63,7 +66,16 @@ export async function sendNotificationToAll(title: string, message: string, link
     };
   }
 
-  const payload = JSON.stringify({ title, message, link });
+  // Mobile & OS optimized Web Push Payload
+  const payload = JSON.stringify({
+    title,
+    message,
+    link,
+    icon: "/gfg.png",
+    badge: "/gfg.png",
+    vibrate: [200, 100, 200, 100, 200],
+    tag: "gfg-notice-broadcast",
+  });
 
   // 5. Dispatch Web Push payload to all registered device endpoints
   let sentCount = 0;
@@ -102,7 +114,7 @@ export async function sendNotificationToAll(title: string, message: string, link
     };
   }
 
-  return { success: true, count: sentCount };
+  return { success: true, count: sentCount, notif: newNotif };
 }
 
 // Compat export wrapper for object-style client calls from Notice page
