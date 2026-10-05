@@ -5,11 +5,11 @@ import { createClient } from "@/lib/supabase/client";
 import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
 
-function urlBase64ToUint8Array(base64String: string) {
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const cleanKey = base64String.replace(/['"]/g, "").trim();
   const padding = "=".repeat((4 - (cleanKey.length % 4)) % 4);
   const base64 = (cleanKey + padding).replace(/-/g, "+").replace(/_/g, "/");
-  
+
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -22,7 +22,7 @@ export function NotificationBell() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
-  
+
   const [pushEnabled, setPushEnabled] = useState<boolean | null>(null);
   const [isIosBrowser, setIsIosBrowser] = useState(false);
   const [showAutoBanner, setShowAutoBanner] = useState(false);
@@ -37,7 +37,8 @@ export function NotificationBell() {
 
     if (typeof window !== "undefined") {
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-      const isStandalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as any).standalone;
+      const isStandalone =
+        window.matchMedia("(display-mode: standalone)").matches || (navigator as any).standalone;
       if (isIOS && !isStandalone) {
         setIsIosBrowser(true);
       }
@@ -108,45 +109,66 @@ export function NotificationBell() {
     }
   }
 
-  async function getActiveServiceWorker() {
-    await navigator.serviceWorker.register("/sw.js");
-    return Promise.race([
-      navigator.serviceWorker.ready,
-      new Promise<ServiceWorkerRegistration>((_, reject) =>
-        setTimeout(() => reject(new Error("Service Worker activation timed out.")), 4000)
-      )
-    ]);
-  }
-
-  async function syncPushToken() {
+  async function syncPushToken(): Promise<boolean> {
     try {
-      const reg = await getActiveServiceWorker();
+      if (!("serviceWorker" in navigator)) return false;
+
+      await navigator.serviceWorker.register("/sw.js");
+      const reg = await navigator.serviceWorker.ready;
+
       const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!rawVapidKey) throw new Error("VAPID public key missing");
+      if (!rawVapidKey) throw new Error("VAPID public key missing in environment");
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
-      
-      const subscribePromise = reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: convertedKey,
-      });
-      
-      const subTimeout = new Promise<PushSubscription>((_, reject) => 
-        setTimeout(() => reject(new Error("Push subscription timed out.")), 5000)
-      );
-      
-      let sub = await Promise.race([reg.pushManager.getSubscription(), subTimeout]);
-      
-      if (!sub) {
-        sub = await Promise.race([subscribePromise, subTimeout]);
+
+      // 1. Safely fetch existing subscription
+      const currentSub = await reg.pushManager.getSubscription();
+      let needsNewSub = true;
+
+      // 2. Unsubscribe if invalid or stale (without mutating a union type)
+      if (currentSub) {
+        try {
+          const subJson = currentSub.toJSON();
+          if (subJson.keys) {
+            needsNewSub = false; // It is valid, keep it
+          } else {
+            await currentSub.unsubscribe();
+          }
+        } catch {
+          await currentSub.unsubscribe();
+        }
       }
 
+      let finalSub: PushSubscription | null = currentSub;
+
+      // 3. Create a fresh subscription only if required
+      if (needsNewSub || !finalSub) {
+        finalSub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          // Bypass TS2322 strict ArrayBuffer check by casting to any
+          applicationServerKey: convertedKey as any,
+        });
+      }
+
+      // 4. Strict Type Guard (Fixes TS18047 completely)
+      if (!finalSub) {
+        throw new Error("Push subscription could not be established.");
+      }
+
+      // Now finalSub is guaranteed by TypeScript to be a PushSubscription
       const { data: { user } } = await supabase.auth.getUser();
-      if (user && sub) {
+      if (user) {
+        const subJson = finalSub.toJSON();
+        const subHash = btoa(finalSub.endpoint);
+
         const { error } = await supabase
           .from("push_subscriptions")
           .upsert(
-            { user_id: user.id, subscription_json: sub.toJSON() },
+            {
+              user_id: user.id,
+              subscription: subJson,
+              subscription_hash: subHash,
+            },
             { onConflict: "subscription_hash" }
           );
 
@@ -177,21 +199,16 @@ export function NotificationBell() {
 
     setEnabling(true);
 
-    const watchdog = setTimeout(() => {
-      setEnabling(false);
-      alert("The request took too long. Your browser may be blocking notifications. Check site settings.");
-    }, 8000);
-
     try {
       let permission = Notification.permission;
       if (permission !== "granted") {
         permission = await Notification.requestPermission();
       }
-      
+
       if (permission === "granted") {
         const synced = await syncPushToken();
         if (synced) {
-          const reg = await navigator.serviceWorker.getRegistration();
+          const reg = await navigator.serviceWorker.ready;
           if (reg) {
             await reg.showNotification("Notifications Active! 🎉", {
               body: "Mobile alerts configured and synced successfully.",
@@ -211,7 +228,6 @@ export function NotificationBell() {
       console.error("Error enabling push notifications:", err);
       alert(`Could not subscribe: ${err?.message || "Check VAPID variables"}`);
     } finally {
-      clearTimeout(watchdog);
       setEnabling(false);
     }
   }

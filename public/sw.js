@@ -1,7 +1,7 @@
 // public/sw.js
 
 // 1. Immediately activate updated service worker without waiting
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
@@ -9,7 +9,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// 2. Handle incoming Web Push payload from Google / Apple
+// 2. Handle incoming Web Push payload from Google / Apple / Mozilla
 self.addEventListener("push", (event) => {
   let data = {
     title: "GeeksforGeeks SRMIST",
@@ -49,10 +49,13 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
-  const targetUrl = event.notification.data?.url || "/dashboard";
+  const targetUrl = new URL(
+    event.notification.data?.url || "/dashboard",
+    self.location.origin
+  ).href;
 
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
       // If a portal tab is already open, focus and navigate it
       for (let client of windowClients) {
         if (client.url.includes(self.location.origin) && "focus" in client) {
@@ -63,8 +66,8 @@ self.addEventListener("notificationclick", (event) => {
         }
       }
       // Otherwise open a new portal tab
-      if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
       }
     })
   );

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { sendNotification } from "@/app/actions/notify";
 import { 
   Bell, Plus, Loader2, Trash2, Send, AlertTriangle, CheckCircle2, 
   Bold, Italic, List, Code, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock
@@ -149,32 +150,16 @@ export default function NoticesPage() {
     const broadcastTitle = `${isImportant ? '🚨' : '📢'} New Notice: ${title}`;
     const broadcastMessage = content.substring(0, 100) + "...";
 
-    // 2. Insert into Bell Notification History
-    await supabase.from("notifications").insert({
-      title: broadcastTitle,
-      message: broadcastMessage,
-      type: isImportant ? "urgent" : "notice"
-    });
-
-    // 3. EXPLICITLY CALL PUSH WEBHOOK TO WAKE UP DEVICES ACROSS OS
+    // 2. Trigger Real-time Bell & OS Push via Server Action
     try {
-      await fetch("/api/webhooks/push", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
-        },
-        body: JSON.stringify({
-          record: {
-            title: broadcastTitle,
-            message: broadcastMessage,
-            link: "/dashboard/notices",
-            target_user_id: null
-          }
-        }),
+      await sendNotification({
+        title: broadcastTitle,
+        message: broadcastMessage,
+        link: "/dashboard/notices",
+        target_user_id: null // Broadcast to all
       });
     } catch (pushErr) {
-      console.error("Failed to trigger push webhook:", pushErr);
+      console.error("Failed to trigger push notification:", pushErr);
     }
 
     setTitle("");
@@ -183,7 +168,7 @@ export default function NoticesPage() {
     setIsPublishing(false);
     
     await fetchData();
-    setActiveTab("board"); // Auto-switch to Notice Board tab after posting
+    setActiveTab("board");
   }
 
   async function confirmAndDeleteNotice() {
@@ -205,29 +190,13 @@ export default function NoticesPage() {
     const reminderTitle = `⏰ REMINDER: ${notice.title}`;
     const reminderMessage = `Important reminder regarding notice published on ${new Date(notice.created_at).toLocaleDateString()}`;
 
-    // 1. Insert into Bell Notification History
-    await supabase.from("notifications").insert({
-      title: reminderTitle,
-      message: reminderMessage,
-      type: "reminder"
-    });
-
-    // 2. EXPLICITLY CALL PUSH WEBHOOK FOR REMINDER
+    // Trigger Real-time Bell & OS Push via Server Action
     try {
-      await fetch("/api/webhooks/push", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
-        },
-        body: JSON.stringify({
-          record: {
-            title: reminderTitle,
-            message: reminderMessage,
-            link: "/dashboard/notices",
-            target_user_id: null
-          }
-        }),
+      await sendNotification({
+        title: reminderTitle,
+        message: reminderMessage,
+        link: "/dashboard/notices",
+        target_user_id: null
       });
     } catch (pushErr) {
       console.error("Failed to trigger push reminder:", pushErr);
