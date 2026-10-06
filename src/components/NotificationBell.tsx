@@ -5,18 +5,31 @@ import { createClient } from "@/lib/supabase/client";
 import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
 
+/**
+ * Bulletproof VAPID Base64-to-Uint8Array conversion function.
+ * Safely converts Base64/Base64URL public VAPID keys into a valid BufferSource
+ * across iOS Safari (PWA) and Android Chrome without throwing atob DOMExceptions.
+ */
 function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
-  const cleanKey = base64String.trim().replace(/['"]/g, "");
-  const padding = "=".repeat((4 - (cleanKey.length % 4)) % 4);
-  const base64 = (cleanKey + padding).replace(/\-/g, "+").replace(/_/g, "/");
+  // 1. Sanitize the key: strip quotes, spaces, newlines, and trailing characters
+  let cleanKey = base64String.trim().replace(/['"]/g, "").replace(/\s+/g, "");
 
-  const rawData = window.atob(base64);
+  // 2. Convert Base64URL characters (- and _) to standard Base64 (+ and /)
+  cleanKey = cleanKey.replace(/-/g, "+").replace(/_/g, "/");
+
+  // 3. Ensure exact Base64 length padding divisible by 4
+  const padLength = (4 - (cleanKey.length % 4)) % 4;
+  cleanKey += "=".repeat(padLength);
+
+  // 4. Decode binary string safely using window.atob
+  const rawData = window.atob(cleanKey);
   const buffer = new ArrayBuffer(rawData.length);
   const outputArray = new Uint8Array(buffer);
 
   for (let i = 0; i < rawData.length; ++i) {
     outputArray[i] = rawData.charCodeAt(i);
   }
+
   return outputArray as Uint8Array<ArrayBuffer>;
 }
 
@@ -53,6 +66,7 @@ export function NotificationBell() {
     }
     document.addEventListener("mousedown", handleClickOutside);
 
+    // Real-time listener for newly inserted broadcast notices
     const channel = supabase
       .channel("realtime_notifications")
       .on(
@@ -99,7 +113,7 @@ export function NotificationBell() {
   async function syncPushToken(): Promise<{ success: boolean; error?: string }> {
     try {
       if (!("serviceWorker" in navigator)) {
-        return { success: false, error: "Service Worker not supported" };
+        return { success: false, error: "Service Workers are not supported on this device" };
       }
 
       await navigator.serviceWorker.register("/sw.js");
@@ -107,7 +121,7 @@ export function NotificationBell() {
 
       const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
       if (!rawVapidKey) {
-        return { success: false, error: "NEXT_PUBLIC_VAPID_PUBLIC_KEY missing in environment variables" };
+        return { success: false, error: "NEXT_PUBLIC_VAPID_PUBLIC_KEY is missing in environment variables" };
       }
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
