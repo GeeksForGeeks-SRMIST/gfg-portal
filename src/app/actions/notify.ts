@@ -9,44 +9,38 @@ export async function sendNotificationToAll(
 ) {
   const supabase = await createClient();
 
-  // 1. Verify caller user session
+  // 1. Verify session
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return { success: false, error: "Unauthorized access: Please sign in." };
+    return { success: false, error: "Unauthorized access: Session expired." };
   }
 
-  // 2. Insert notification record for in-app bell dropdown history
-  const { data: newNotif, error: notifErr } = await supabase
-    .from("notifications")
-    .insert([
-      {
-        title,
-        message,
-        link,
-        type: "announcement",
-        target_user_id: null, // Broadcast to all core team members
-      },
-    ])
-    .select()
-    .single();
+  // 2. Execute elevated RPC function to create database history record
+  const { data: newNotifRecord, error: notifErr } = await supabase.rpc(
+    "create_broadcast_notification",
+    {
+      p_title: title,
+      p_message: message,
+      p_link: link,
+    }
+  );
 
   if (notifErr) {
-    console.error("Failed to store in-app notification record in DB:", notifErr.message);
+    console.error("Failed to insert notification into database history:", notifErr.message);
   }
 
-  // 3. Check for OneSignal Environment Variables
+  // 3. Verify OneSignal Keys
   const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_REST_API_KEY;
 
   if (!appId || !apiKey) {
-    console.error("OneSignal API configuration missing in environment variables.");
     return {
       success: false,
-      error:
-        "OneSignal API keys missing in environment variables (NEXT_PUBLIC_ONESIGNAL_APP_ID / ONESIGNAL_REST_API_KEY).",
+      error: "OneSignal API keys missing in Vercel environment settings.",
+      notif: newNotifRecord,
     };
   }
 
@@ -54,7 +48,7 @@ export async function sendNotificationToAll(
   try {
     const targetUrl = link.startsWith("http")
       ? link
-      : `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}${link}`;
+      : `${process.env.NEXT_PUBLIC_APP_URL || "https://gfgsrmist-portal.vercel.app"}${link}`;
 
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
@@ -64,7 +58,7 @@ export async function sendNotificationToAll(
       },
       body: JSON.stringify({
         app_id: appId,
-        included_segments: ["Total Subscriptions", "Subscribed Users"], // Broadcast to all registered devices
+        included_segments: ["Total Subscriptions"],
         headings: { en: title },
         contents: { en: message },
         url: targetUrl,
@@ -76,21 +70,24 @@ export async function sendNotificationToAll(
     const data = await res.json();
 
     if (!res.ok) {
-      console.error("OneSignal API response error:", data);
       return {
         success: false,
-        error: data?.errors?.[0] || "Failed to dispatch push alert via OneSignal.",
+        error: data?.errors?.[0] || "OneSignal push dispatch failed.",
+        notif: newNotifRecord,
       };
     }
 
     return {
       success: true,
-      count: data.recipients || 1,
-      notif: newNotif,
+      recipients: data.recipients || 1,
+      notif: newNotifRecord,
     };
   } catch (err: any) {
-    console.error("Error calling OneSignal API:", err);
-    return { success: false, error: err?.message || String(err) };
+    return {
+      success: false,
+      error: err?.message || String(err),
+      notif: newNotifRecord,
+    };
   }
 }
 

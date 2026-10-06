@@ -40,9 +40,9 @@ export default function NoticesPage() {
   useEffect(() => {
     fetchData();
 
-    // Subscribe to real-time notice insertions/deletions
+    // Subscribe to real-time notice insertions and deletions
     const channel = supabase
-      .channel("notices_realtime")
+      .channel("notices_realtime_board_v3")
       .on("postgres_changes", { event: "*", schema: "public", table: "notices" }, () => {
         fetchData();
       })
@@ -72,7 +72,6 @@ export default function NoticesPage() {
 
   const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(profile?.role?.toLowerCase());
 
-  // Text Formatting Helpers for Textarea
   function insertFormatting(syntaxBefore: string, syntaxAfter: string = "") {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -91,7 +90,6 @@ export default function NoticesPage() {
     }, 0);
   }
 
-  // Helper to parse content text, bold/italic syntax, and turn URLs into clickable links
   function renderFormattedContent(text: string) {
     if (!text) return null;
 
@@ -140,7 +138,7 @@ export default function NoticesPage() {
     if (!title || !content || !isLead) return;
     setIsPublishing(true);
 
-    // 1. Insert Notice into Database
+    // 1. Insert Notice into Database Board
     const { error: insertErr } = await supabase.from("notices").insert({
       title,
       content,
@@ -158,10 +156,10 @@ export default function NoticesPage() {
       return;
     }
 
-    const broadcastTitle = `${isImportant ? '🚨' : '📢'} New Notice: ${title}`;
+    const broadcastTitle = `${isImportant ? '🚨' : '📢'} ${title}`;
     const broadcastMessage = content.substring(0, 100) + "...";
 
-    // 2. Trigger Real-time Bell & OS Push via Server Action
+    // 2. Trigger Push & Notification Bell History Log
     try {
       const res = await sendNotification({
         title: broadcastTitle,
@@ -170,10 +168,14 @@ export default function NoticesPage() {
         target_user_id: null
       });
 
+      if (res.notif) {
+        window.dispatchEvent(new CustomEvent("gfg_notice_dispatched", { detail: res.notif }));
+      }
+
       if (!res.success) {
         setAlertModal({
           isOpen: true,
-          message: `Notice saved, but push notification warning: ${res.error}`,
+          message: `Notice published, but push dispatch warning: ${res.error}`,
           isError: true
         });
       }
@@ -207,7 +209,7 @@ export default function NoticesPage() {
 
   async function handleSendReminder(notice: any) {
     const reminderTitle = `⏰ REMINDER: ${notice.title}`;
-    const reminderMessage = `Important reminder regarding notice published on ${new Date(notice.created_at).toLocaleDateString()}`;
+    const reminderMessage = notice.content.substring(0, 100) + "...";
 
     try {
       const res = await sendNotification({
@@ -217,16 +219,20 @@ export default function NoticesPage() {
         target_user_id: null
       });
 
+      if (res.notif) {
+        window.dispatchEvent(new CustomEvent("gfg_notice_dispatched", { detail: res.notif }));
+      }
+
       if (res.success) {
         setAlertModal({
           isOpen: true,
-          message: `Push alert dispatched successfully via OneSignal to ${res.count ?? 1} device subscriber(s)!`,
+          message: `Broadcast sent! Push alert dispatched successfully across all connected devices.`,
           isError: false
         });
       } else {
         setAlertModal({
           isOpen: true,
-          message: `In-app notice updated, but push alert failed: ${res.error}`,
+          message: `Notice logged, but push failed: ${res.error}`,
           isError: true
         });
       }
@@ -240,7 +246,7 @@ export default function NoticesPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-12">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
       
       {/* Page Header & Navigation Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-2">
@@ -249,8 +255,8 @@ export default function NoticesPage() {
             <Bell className="w-6 h-6"/>
           </div>
           <div>
-            <h2 className="text-xl font-black text-gradient">Announcements & Notices</h2>
-            <p className="text-xs font-semibold opacity-60">Official board updates, broadcasts, and reminders.</p>
+            <h2 className="text-xl font-black text-gradient">Announcements & Board</h2>
+            <p className="text-xs font-semibold opacity-60">Official announcements, reminders, and updates.</p>
           </div>
         </div>
 
@@ -264,7 +270,7 @@ export default function NoticesPage() {
                 : "opacity-60 hover:opacity-100"
             }`}
           >
-            <LayoutList className="w-3.5 h-3.5" /> Notice Board
+            <LayoutList className="w-3.5 h-3.5" /> Notice Cards
           </button>
 
           <button
@@ -281,9 +287,9 @@ export default function NoticesPage() {
         </div>
       </div>
 
-      {/* TAB 1: NOTICE BOARD FEED */}
+      {/* TAB 1: CARD-BASED NOTICE FEED (Grid View) */}
       {activeTab === "board" && (
-        <div className="flex flex-col gap-4 animate-in fade-in duration-200">
+        <div className="animate-in fade-in duration-200">
           {loading ? (
             <div className="flex justify-center p-12"><Loader2 className="w-6 h-6 animate-spin opacity-50"/></div>
           ) : notices.length === 0 ? (
@@ -291,70 +297,74 @@ export default function NoticesPage() {
               No announcements published yet.
             </div>
           ) : (
-            notices.map((notice) => (
-              <div key={notice.id} className="neo-flat rounded-3xl p-6 flex flex-col gap-4 relative overflow-hidden transition-all border border-white/5">
-                <div className={`absolute top-0 left-0 w-2 h-full ${notice.is_important ? 'bg-gradient-to-b from-rose-500 to-amber-500' : 'bg-emerald-500'}`} />
-                
-                <div className="space-y-3 pl-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <h3 className={`text-base font-black tracking-tight ${
-                        notice.is_important 
-                          ? 'text-transparent bg-clip-text bg-gradient-to-r from-rose-500 via-rose-400 to-amber-500 font-extrabold text-lg' 
-                          : 'text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-500 font-bold'
-                      }`}>
-                        {notice.title}
-                      </h3>
-                      {notice.is_important && (
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-rose-500/10 text-rose-500 border border-rose-500/30 flex items-center gap-1 shrink-0">
-                          <AlertTriangle className="w-2.5 h-2.5"/> High Priority
-                        </span>
-                      )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {notices.map((notice) => (
+                <div
+                  key={notice.id}
+                  className="neo-flat rounded-3xl p-5 flex flex-col justify-between gap-4 relative overflow-hidden transition-all hover:scale-[1.01] border border-white/5 bg-[var(--bg-base)] shadow-lg"
+                >
+                  <div className={`absolute top-0 left-0 right-0 h-1.5 ${notice.is_important ? 'bg-gradient-to-r from-rose-500 via-rose-400 to-amber-500' : 'bg-emerald-500'}`} />
+
+                  <div className="space-y-3 pt-1">
+                    <div className="space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className={`text-sm font-extrabold leading-snug tracking-tight ${
+                          notice.is_important ? 'text-rose-500 font-black' : 'text-emerald-500'
+                        }`}>
+                          {notice.title}
+                        </h3>
+
+                        {notice.is_important && (
+                          <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-rose-500/10 text-rose-500 border border-rose-500/30 shrink-0 flex items-center gap-1">
+                            <AlertTriangle className="w-2.5 h-2.5" /> Urgent
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-[9px] font-mono opacity-40 uppercase tracking-wider">
+                        {new Date(notice.created_at).toLocaleDateString()}
+                      </p>
                     </div>
 
-                    <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 shrink-0 font-mono">
-                      {new Date(notice.created_at).toLocaleDateString()}
+                    <div className="text-xs opacity-90 font-medium leading-relaxed max-h-48 overflow-y-auto custom-scrollbar p-1">
+                      {renderFormattedContent(notice.content)}
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-[var(--text-muted)]/10 flex items-center justify-between gap-2 text-[9px]">
+                    <span className="font-extrabold text-emerald-500 uppercase tracking-wider truncate">
+                      {notice.author?.full_name || "Executive Lead"}
                     </span>
-                  </div>
 
-                  <div className="text-xs opacity-90 space-y-1.5 font-medium leading-relaxed">
-                    {renderFormattedContent(notice.content)}
+                    {isLead && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => handleSendReminder(notice)}
+                          className="px-2 py-1 neo-btn rounded-lg text-[9px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1 hover:scale-105 transition-transform cursor-pointer"
+                          title="Broadcast Reminder Push"
+                        >
+                          <Send className="w-2.5 h-2.5"/> Remind
+                        </button>
+                        <button
+                          onClick={() => setDeleteModal({ isOpen: true, noticeId: notice.id, title: notice.title })}
+                          className="p-1 neo-btn rounded-lg text-rose-500 hover:scale-110 active:scale-95 transition-transform cursor-pointer"
+                          title="Delete Notice"
+                        >
+                          <Trash2 className="w-3 h-3"/>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                <div className="pt-3 border-t border-[var(--text-muted)]/10 flex items-center justify-between pl-3">
-                  <p className="text-[9px] font-extrabold text-emerald-500 uppercase tracking-widest">
-                    Posted by {notice.author?.full_name || "Executive Lead"} • {notice.author?.role?.replace("_", " ")}
-                  </p>
-
-                  {isLead && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleSendReminder(notice)}
-                        className="px-2.5 py-1.5 neo-btn rounded-xl text-[9px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1 hover:scale-105 transition-all cursor-pointer"
-                        title="Send Real-time Alert Notification"
-                      >
-                        <Send className="w-3 h-3"/> Send Reminder
-                      </button>
-                      <button
-                        onClick={() => setDeleteModal({ isOpen: true, noticeId: notice.id, title: notice.title })}
-                        className="p-2 neo-btn rounded-xl text-rose-500 hover:scale-110 active:scale-95 transition-all cursor-pointer"
-                        title="Delete Notice"
-                      >
-                        <Trash2 className="w-3.5 h-3.5"/>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       )}
 
       {/* TAB 2: POST NOTICE FORM */}
       {activeTab === "post" && (
-        <div className="animate-in fade-in duration-200">
+        <div className="animate-in fade-in duration-200 max-w-3xl mx-auto">
           {!isLead ? (
             <div className="neo-flat rounded-3xl p-10 text-center space-y-3">
               <Lock className="w-8 h-8 text-rose-500 mx-auto opacity-80" />

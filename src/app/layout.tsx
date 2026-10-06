@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "@/app/globals.css";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
-import { GlobalAlert } from "@/components/GlobalAlert";
 import { Providers } from "@/components/Providers";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { OneSignalProvider } from "@/components/OneSignalProvider";
@@ -51,7 +50,6 @@ export default function RootLayout({
             <ServiceWorkerRegister />
             {children}
             <PwaInstallPrompt />
-            <GlobalAlert />
           </Providers>
         </OneSignalProvider>
       </body>
