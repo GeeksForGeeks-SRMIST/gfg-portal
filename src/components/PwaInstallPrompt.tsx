@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, Bell, Share, PlusSquare, X, CheckCircle2, Loader2 } from "lucide-react";
+import { Download, Bell, Share, PlusSquare, X, Loader2 } from "lucide-react";
 import Image from "next/image";
 
 export function PwaInstallPrompt() {
@@ -9,7 +9,7 @@ export function PwaInstallPrompt() {
   const [isIos, setIsIos] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showInstallCard, setShowInstallCard] = useState(false);
-  
+
   const [pushStatus, setPushStatus] = useState<"granted" | "denied" | "default">("default");
   const [showPushCard, setShowPushCard] = useState(false);
   const [isEnablingPush, setIsEnablingPush] = useState(false);
@@ -17,38 +17,55 @@ export function PwaInstallPrompt() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // 1. Detect Standalone / Installed Mode
+    // 1. Comprehensive Installed / Standalone Mode Check
     const standaloneMode =
       window.matchMedia("(display-mode: standalone)").matches ||
-      (navigator as any).standalone === true;
+      (navigator as any).standalone === true ||
+      document.referrer.includes("android-app://");
+
+    const isAlreadyInstalled = localStorage.getItem("gfg_pwa_is_installed") === "true";
+
     setIsStandalone(standaloneMode);
+
+    if (standaloneMode || isAlreadyInstalled) {
+      localStorage.setItem("gfg_pwa_is_installed", "true");
+      setShowInstallCard(false);
+    }
 
     // 2. Detect iOS Device
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
     setIsIos(isIOSDevice);
 
-    // 3. Show Install Card for all non-standalone devices
+    // 3. Show Install Card ONLY if not installed and not dismissed
     const installDismissed = localStorage.getItem("gfg_pwa_install_dismissed");
-    if (!standaloneMode && !installDismissed) {
+    if (!standaloneMode && !isAlreadyInstalled && !installDismissed) {
       setShowInstallCard(true);
     }
 
-    // Capture Android/Chrome Install Prompt
+    // 4. Capture native browser install prompt
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      if (!standaloneMode && !installDismissed) {
+      if (!standaloneMode && !isAlreadyInstalled && !installDismissed) {
         setShowInstallCard(true);
       }
     };
 
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    // 5. Listen for actual successful app installation event
+    const handleAppInstalled = () => {
+      localStorage.setItem("gfg_pwa_is_installed", "true");
+      setShowInstallCard(false);
+      setDeferredPrompt(null);
+    };
 
-    // 4. Notification Permission Detection
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    // 6. Check Push Notification Permission Status
     if ("Notification" in window) {
       const currentPerm = Notification.permission;
       setPushStatus(currentPerm);
-      
+
       const pushDismissed = localStorage.getItem("gfg_push_prompt_dismissed");
       if (currentPerm === "default" && !pushDismissed) {
         setShowPushCard(true);
@@ -57,6 +74,7 @@ export function PwaInstallPrompt() {
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
     };
   }, []);
 
@@ -65,11 +83,12 @@ export function PwaInstallPrompt() {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === "accepted") {
+        localStorage.setItem("gfg_pwa_is_installed", "true");
         setShowInstallCard(false);
       }
       setDeferredPrompt(null);
     } else if (isIos) {
-      alert("iOS Instructions:\n1. Tap the Share button in Safari toolbar.\n2. Scroll down and tap 'Add to Home Screen'.");
+      alert("iOS Setup:\n1. Tap Share in Safari toolbar.\n2. Tap 'Add to Home Screen'.");
     }
   };
 
@@ -107,11 +126,13 @@ export function PwaInstallPrompt() {
     setShowPushCard(false);
   };
 
+  if (isStandalone) return null;
+
   return (
     <div className="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-96 z-50 space-y-3 pointer-events-none">
       
-      {/* CARD 1: Sticky App Installation Banner */}
-      {showInstallCard && !isStandalone && (
+      {/* Sticky Install Card */}
+      {showInstallCard && (
         <div className="pointer-events-auto p-4 neo-flat rounded-[2rem] bg-[var(--bg-base)] border border-emerald-500/40 shadow-2xl animate-in slide-in-from-bottom-5 duration-300">
           <div className="flex items-start justify-between gap-3">
             <div className="w-11 h-11 rounded-2xl neo-pressed flex items-center justify-center p-2 shrink-0 border border-emerald-500/20">
@@ -162,7 +183,7 @@ export function PwaInstallPrompt() {
         </div>
       )}
 
-      {/* CARD 2: Sticky Notification Permission Banner */}
+      {/* Sticky Notification Card */}
       {showPushCard && pushStatus === "default" && (
         <div className="pointer-events-auto p-4 neo-flat rounded-[2rem] bg-[var(--bg-base)] border border-amber-500/40 shadow-2xl animate-in slide-in-from-bottom-5 duration-300">
           <div className="flex items-start justify-between gap-3">
@@ -174,7 +195,7 @@ export function PwaInstallPrompt() {
                 Enable Push Alerts
               </h4>
               <p className="text-[10px] opacity-70 mt-0.5 leading-relaxed">
-                Receive real-time chapter announcements, task deadlines, and official reminders.
+                Receive real-time announcements, task deadlines, and official reminders.
               </p>
             </div>
             <button

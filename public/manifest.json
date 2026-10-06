@@ -3,6 +3,7 @@
   "short_name": "GFG CORE TEAM",
   "description": "GeeksforGeeks SRMIST Student Chapter Core Team Portal",
   "start_url": "/dashboard",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0d1117",
   "theme_color": "#2f8d46",
