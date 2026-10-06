@@ -83,7 +83,6 @@ export function NotificationBell() {
       return;
     }
 
-    // Always attempt syncing the active device token directly to ensure endpoint exists in DB
     if (Notification.permission === "granted") {
       await syncPushToken();
       return;
@@ -96,15 +95,19 @@ export function NotificationBell() {
     }
   }
 
-  async function syncPushToken(): Promise<boolean> {
+  async function syncPushToken(): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!("serviceWorker" in navigator)) return false;
+      if (!("serviceWorker" in navigator)) {
+        return { success: false, error: "Service Worker not supported" };
+      }
 
       await navigator.serviceWorker.register("/sw.js");
       const reg = await navigator.serviceWorker.ready;
 
       const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!rawVapidKey) throw new Error("VAPID public key missing in environment");
+      if (!rawVapidKey) {
+        return { success: false, error: "NEXT_PUBLIC_VAPID_PUBLIC_KEY is missing in env" };
+      }
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
 
@@ -118,48 +121,50 @@ export function NotificationBell() {
       }
 
       if (!currentSub) {
-        throw new Error("Push subscription could not be established.");
+        return { success: false, error: "Browser failed to generate push token." };
       }
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const subJson = currentSub.toJSON();
+      if (!user) {
+        return { success: false, error: "User not authenticated in Supabase." };
+      }
 
-        // 1. Fetch user's active push device subscriptions
-        const { data: existingSubs } = await supabase
-          .from("push_subscriptions")
-          .select("id, subscription_json")
-          .eq("user_id", user.id);
+      const subJson = currentSub.toJSON();
 
-        // 2. Strictly check if THIS SPECIFIC device endpoint exists in Supabase
-        const isThisDeviceInDb = existingSubs?.some(
-          (row: any) => row.subscription_json?.endpoint === subJson.endpoint
-        );
+      // 1. Check existing device records
+      const { data: existingSubs, error: fetchErr } = await supabase
+        .from("push_subscriptions")
+        .select("id, subscription_json")
+        .eq("user_id", user.id);
 
-        let dbError = null;
+      if (fetchErr) {
+        console.error("Fetch subscriptions error:", fetchErr.message);
+      }
 
-        if (!isThisDeviceInDb) {
-          // 3. Register as a new endpoint row for multi-device delivery
-          const { error } = await supabase.from("push_subscriptions").insert({
-            user_id: user.id,
-            subscription_json: subJson,
-          });
-          dbError = error;
-        }
+      const isAlreadySaved = (existingSubs || []).some(
+        (row: any) => row.subscription_json?.endpoint === subJson.endpoint
+      );
 
-        if (!dbError) {
-          setPushEnabled(true);
-          setShowAutoBanner(false);
-          return true;
-        } else {
-          console.error("Database push sync error:", dbError.message);
+      if (!isAlreadySaved) {
+        // 2. Insert new device endpoint into database
+        const { error: insertErr } = await supabase.from("push_subscriptions").insert({
+          user_id: user.id,
+          subscription_json: subJson,
+        });
+
+        if (insertErr) {
+          console.error("Insert subscription error:", insertErr.message);
+          return { success: false, error: insertErr.message };
         }
       }
+
+      setPushEnabled(true);
+      setShowAutoBanner(false);
+      return { success: true };
     } catch (err: any) {
       console.error("Failed to sync push token:", err?.message || err);
+      return { success: false, error: err?.message || String(err) };
     }
-    setPushEnabled(false);
-    return false;
   }
 
   async function requestPushPermission() {
@@ -181,8 +186,8 @@ export function NotificationBell() {
       }
 
       if (permission === "granted") {
-        const synced = await syncPushToken();
-        if (synced) {
+        const result = await syncPushToken();
+        if (result.success) {
           const reg = await navigator.serviceWorker.ready;
           if (reg) {
             await reg.showNotification("Notifications Active! 🎉", {
@@ -193,7 +198,7 @@ export function NotificationBell() {
             });
           }
         } else {
-          alert("Could not save device token. Please refresh the page.");
+          alert(`Sync failed: ${result.error || "Unknown error"}`);
         }
       } else {
         alert("Notification permission was denied in browser settings.");
