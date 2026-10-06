@@ -4,28 +4,6 @@ import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
 
-/**
- * Robust Base64URL to Uint8Array decoder.
- * Handles URL-safe base64 (- and _), strips quotes/whitespace, and appends = padding.
- */
-function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
-  let cleanKey = base64String.trim().replace(/['"]/g, "").replace(/\s+/g, "");
-  cleanKey = cleanKey.replace(/-/g, "+").replace(/_/g, "/");
-
-  const padLength = (4 - (cleanKey.length % 4)) % 4;
-  cleanKey += "=".repeat(padLength);
-
-  const rawData = window.atob(cleanKey);
-  const buffer = new ArrayBuffer(rawData.length);
-  const outputArray = new Uint8Array(buffer);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-
-  return outputArray as Uint8Array<ArrayBuffer>;
-}
-
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -102,33 +80,32 @@ export function NotificationBell() {
     }
   }
 
+  // Simplified Push Registration without custom atob loops
   async function syncPushToken(): Promise<{ success: boolean; error?: string }> {
     try {
       if (!("serviceWorker" in navigator)) {
-        return { success: false, error: "Service Workers are not supported" };
+        return { success: false, error: "Service Worker not supported" };
       }
 
       await navigator.serviceWorker.register("/sw.js");
       const reg = await navigator.serviceWorker.ready;
 
-      const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!rawVapidKey) {
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidKey) {
         return { success: false, error: "NEXT_PUBLIC_VAPID_PUBLIC_KEY missing in env" };
       }
-
-      const convertedKey = urlBase64ToUint8Array(rawVapidKey);
 
       let currentSub = await reg.pushManager.getSubscription();
 
       if (!currentSub) {
         currentSub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: convertedKey,
+          applicationServerKey: vapidKey.trim().replace(/['"]/g, ""),
         });
       }
 
       if (!currentSub) {
-        return { success: false, error: "Failed to establish Web Push subscription." };
+        return { success: false, error: "Browser failed to subscribe." };
       }
 
       const { data: { user } } = await supabase.auth.getUser();
@@ -138,7 +115,6 @@ export function NotificationBell() {
 
       const subJson = currentSub.toJSON();
 
-      // Query active user endpoints
       const { data: existingSubs } = await supabase
         .from("push_subscriptions")
         .select("id, subscription_json")
