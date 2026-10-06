@@ -1,17 +1,59 @@
+// public/sw.js
+
 // 1. Immediately activate updated service worker without waiting
-self.addEventListener("install", () => {
+self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cache) => {
+          // Clear stale caches on activation
+          return caches.delete(cache);
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
-// 2. Handle incoming Web Push payload from Google / Apple / Mozilla
+// 2. Network-first fetch strategy for seamless seamless client updates
+self.addEventListener("fetch", (event) => {
+  // Only intercept GET requests
+  if (event.request.method !== "GET") return;
+
+  // Let browser/OneSignal handles API, WebSockets, or third-party SDK calls
+  const url = new URL(event.request.url);
+  if (
+    url.origin !== self.location.origin ||
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/_next/webpack-hmr")
+  ) {
+    return;
+  }
+
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        // Clone and store fresh response in cache if valid
+        if (response && response.status === 200 && response.type === "basic") {
+          const responseToCache = response.clone();
+          caches.open("gfg-core-v2").then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
+  );
+});
+
+// 3. Handle incoming Web Push payload from Google / Apple / Mozilla / OneSignal fallback
 self.addEventListener("push", (event) => {
   let data = {
-    title: "GeeksforGeeks SRMIST",
-    message: "New alert received!",
+    title: "GFG CORE TEAM",
+    message: "New update received!",
     link: "/dashboard/notices",
   };
 
@@ -19,8 +61,8 @@ self.addEventListener("push", (event) => {
     try {
       const parsed = event.data.json();
       data = {
-        title: parsed.title || data.title,
-        message: parsed.message || parsed.body || data.message,
+        title: parsed.title || parsed.headings?.en || data.title,
+        message: parsed.message || parsed.contents?.en || parsed.body || data.message,
         link: parsed.link || parsed.url || data.link,
       };
     } catch (e) {
@@ -46,7 +88,7 @@ self.addEventListener("push", (event) => {
   );
 });
 
-// 3. Handle notification click on phone/desktop OS
+// 4. Handle notification click on phone/desktop OS
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 

@@ -63,7 +63,9 @@ export function PwaInstallPrompt() {
           <Image src="/gfg.png" alt="GFG" width={32} height={32} className="object-contain" />
         </div>
         <div className="flex-1">
-          <h4 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500">Install GFG Portal</h4>
+          <h4 className="text-xs font-black uppercase tracking-widest text-emerald-500">
+            Install GFG CORE TEAM
+          </h4>
           <p className="text-[10px] opacity-70 mt-0.5 leading-relaxed">
             Add to home screen for instant access, offline support, and phone alerts.
           </p>

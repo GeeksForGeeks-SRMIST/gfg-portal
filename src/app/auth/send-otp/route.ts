@@ -99,9 +99,9 @@ export async function POST(request: Request) {
 
     // 5. Send OTP Email
     await transporter.sendMail({
-      from: `"GFS SRMIST Core Portal" <${smtpEmail}>`,
+      from: `"GeeksforGeeks SRMIST" <${smtpEmail}>`,
       to: srmEmail.trim(),
-      subject: "Your Password Reset OTP - GFS SRMIST",
+      subject: "Your Password Reset OTP - GeeksforGeeks SRMIST",
       html: `
         <div style="font-family: sans-serif; padding: 24px; color: #333; max-width: 500px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px;">
           <h2 style="color: #10b981; font-weight: 800; margin-bottom: 8px;">GeeksforGeeks SRMIST</h2>
