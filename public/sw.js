@@ -57,7 +57,6 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
-      // If a portal tab is already open, focus and navigate it
       for (let client of windowClients) {
         if (client.url.includes(self.location.origin) && "focus" in client) {
           if ("navigate" in client) {
@@ -66,7 +65,6 @@ self.addEventListener("notificationclick", (event) => {
           return client.focus();
         }
       }
-      // Otherwise open a new portal tab
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl);
       }

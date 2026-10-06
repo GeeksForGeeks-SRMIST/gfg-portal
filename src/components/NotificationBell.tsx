@@ -6,17 +6,18 @@ import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from
 import Link from "next/link";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
-  const cleanKey = base64String.replace(/['"]/g, "").trim();
+  const cleanKey = base64String.trim().replace(/['"]/g, "");
   const padding = "=".repeat((4 - (cleanKey.length % 4)) % 4);
-  const base64 = (cleanKey + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const base64 = (cleanKey + padding).replace(/\-/g, "+").replace(/_/g, "/");
 
   const rawData = window.atob(base64);
   const buffer = new ArrayBuffer(rawData.length);
   const outputArray = new Uint8Array(buffer);
+
   for (let i = 0; i < rawData.length; ++i) {
     outputArray[i] = rawData.charCodeAt(i);
   }
-  return outputArray;
+  return outputArray as Uint8Array<ArrayBuffer>;
 }
 
 export function NotificationBell() {
@@ -106,7 +107,7 @@ export function NotificationBell() {
 
       const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
       if (!rawVapidKey) {
-        return { success: false, error: "NEXT_PUBLIC_VAPID_PUBLIC_KEY is missing in env" };
+        return { success: false, error: "NEXT_PUBLIC_VAPID_PUBLIC_KEY missing in environment variables" };
       }
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
@@ -121,7 +122,7 @@ export function NotificationBell() {
       }
 
       if (!currentSub) {
-        return { success: false, error: "Browser failed to generate push token." };
+        return { success: false, error: "Browser failed to establish Web Push subscription." };
       }
 
       const { data: { user } } = await supabase.auth.getUser();
@@ -131,26 +132,25 @@ export function NotificationBell() {
 
       const subJson = currentSub.toJSON();
 
-      // 1. Check existing device records
-      const { data: existingSubs, error: fetchErr } = await supabase
+      // Check existing device records for this user
+      const { data: existingSubs } = await supabase
         .from("push_subscriptions")
         .select("id, subscription_json")
         .eq("user_id", user.id);
 
-      if (fetchErr) {
-        console.error("Fetch subscriptions error:", fetchErr.message);
-      }
-
-      const isAlreadySaved = (existingSubs || []).some(
+      const targetRow = (existingSubs || []).find(
         (row: any) => row.subscription_json?.endpoint === subJson.endpoint
       );
 
-      if (!isAlreadySaved) {
-        // 2. Insert new device endpoint into database
-        const { error: insertErr } = await supabase.from("push_subscriptions").insert({
-          user_id: user.id,
-          subscription_json: subJson,
-        });
+      if (targetRow) {
+        await supabase
+          .from("push_subscriptions")
+          .update({ subscription_json: subJson })
+          .eq("id", targetRow.id);
+      } else {
+        const { error: insertErr } = await supabase
+          .from("push_subscriptions")
+          .insert({ user_id: user.id, subscription_json: subJson });
 
         if (insertErr) {
           console.error("Insert subscription error:", insertErr.message);
