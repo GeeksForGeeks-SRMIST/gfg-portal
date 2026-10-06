@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { sendNotification } from "@/app/actions/notify";
 import { 
   Bell, Plus, Loader2, Trash2, Send, AlertTriangle, CheckCircle2, 
-  Bold, Italic, List, Code, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock
+  Bold, Italic, List, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock
 } from "lucide-react";
 
 export default function NoticesPage() {
@@ -29,9 +29,10 @@ export default function NoticesPage() {
   });
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string; isError?: boolean }>({
     isOpen: false,
-    message: ""
+    message: "",
+    isError: false
   });
 
   const supabase = createClient();
@@ -140,12 +141,22 @@ export default function NoticesPage() {
     setIsPublishing(true);
 
     // 1. Insert Notice into Database
-    await supabase.from("notices").insert({
+    const { error: insertErr } = await supabase.from("notices").insert({
       title,
       content,
       is_important: isImportant,
       author_id: profile?.id
     });
+
+    if (insertErr) {
+      setAlertModal({
+        isOpen: true,
+        message: `Failed to save notice: ${insertErr.message}`,
+        isError: true
+      });
+      setIsPublishing(false);
+      return;
+    }
 
     const broadcastTitle = `${isImportant ? '🚨' : '📢'} New Notice: ${title}`;
     const broadcastMessage = content.substring(0, 100) + "...";
@@ -160,9 +171,13 @@ export default function NoticesPage() {
       });
 
       if (!res.success) {
-        console.warn("Push notification warning:", res.error);
+        setAlertModal({
+          isOpen: true,
+          message: `Notice saved, but push notification warning: ${res.error}`,
+          isError: true
+        });
       }
-    } catch (pushErr) {
+    } catch (pushErr: any) {
       console.error("Failed to trigger push notification:", pushErr);
     }
 
@@ -205,18 +220,21 @@ export default function NoticesPage() {
       if (res.success) {
         setAlertModal({
           isOpen: true,
-          message: `Push alert dispatched to ${res.count ?? 0} active device(s)!`
+          message: `Push alert dispatched successfully via OneSignal to ${res.count ?? 1} device subscriber(s)!`,
+          isError: false
         });
       } else {
         setAlertModal({
           isOpen: true,
-          message: `In-app notice updated, but push alert failed: ${res.error}`
+          message: `In-app notice updated, but push alert failed: ${res.error}`,
+          isError: true
         });
       }
     } catch (pushErr: any) {
       setAlertModal({
         isOpen: true,
-        message: `Error dispatching reminder: ${pushErr?.message || pushErr}`
+        message: `Error dispatching reminder: ${pushErr?.message || pushErr}`,
+        isError: true
       });
     }
   }
@@ -474,21 +492,21 @@ export default function NoticesPage() {
         </div>
       )}
 
-      {/* Alert Modal for Reminders */}
+      {/* Alert Modal for Reminders & Server Output */}
       {alertModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 text-emerald-500">
-                <CheckCircle2 className="w-5 h-5"/>
+              <div className={`w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0 ${alertModal.isError ? 'text-rose-500' : 'text-emerald-500'}`}>
+                {alertModal.isError ? <AlertTriangle className="w-5 h-5"/> : <CheckCircle2 className="w-5 h-5"/>}
               </div>
-              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Server Action Output</h3>
+              <h3 className="text-xs font-black uppercase tracking-widest text-[var(--text-main)]">Notification Status</h3>
             </div>
 
             <p className="text-xs opacity-80 leading-relaxed px-1 text-[var(--text-main)]">{alertModal.message}</p>
 
             <button
-              onClick={() => setAlertModal({ isOpen: false, message: "" })}
+              onClick={() => setAlertModal({ isOpen: false, message: "", isError: false })}
               className="w-full py-3 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer"
             >
               Okay
