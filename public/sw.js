@@ -1,6 +1,8 @@
 // public/sw.js
 
-// 1. Immediately activate updated service worker without waiting
+const ICON_CACHE_NAME = "gfg-icon-v1";
+
+// 1. Instantly activate updated service worker without waiting
 self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
@@ -10,46 +12,54 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
-          // Clear stale caches on activation
-          return caches.delete(cache);
+          if (cache !== ICON_CACHE_NAME) {
+            return caches.delete(cache);
+          }
         })
       );
     }).then(() => self.clients.claim())
   );
 });
 
-// 2. Network-first fetch strategy for seamless seamless client updates
+// 2. Selective Fetch Strategy: Cache ONLY icons/manifests, let everything else pass through
 self.addEventListener("fetch", (event) => {
-  // Only intercept GET requests
   if (event.request.method !== "GET") return;
 
-  // Let browser/OneSignal handles API, WebSockets, or third-party SDK calls
   const url = new URL(event.request.url);
-  if (
-    url.origin !== self.location.origin ||
-    url.pathname.startsWith("/api/") ||
-    url.pathname.startsWith("/_next/webpack-hmr")
-  ) {
+
+  // ONLY intercept icon and manifest requests
+  const isAppIcon =
+    url.pathname.includes("gfg") ||
+    url.pathname.includes("icon") ||
+    url.pathname.includes("manifest") ||
+    url.pathname.endsWith(".png") ||
+    url.pathname.endsWith(".ico");
+
+  if (!isAppIcon || url.origin !== self.location.origin) {
+    // Let Next.js, API routes, and JavaScript chunks load directly from network without caching
     return;
   }
 
+  // Stale-While-Revalidate for icons: Serve instantly from cache, update cache in background
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        // Clone and store fresh response in cache if valid
-        if (response && response.status === 200 && response.type === "basic") {
-          const responseToCache = response.clone();
-          caches.open("gfg-core-v2").then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return response;
-      })
-      .catch(() => caches.match(event.request))
+    caches.open(ICON_CACHE_NAME).then((cache) => {
+      return cache.match(event.request).then((cachedResponse) => {
+        const fetchPromise = fetch(event.request)
+          .then((networkResponse) => {
+            if (networkResponse && networkResponse.status === 200) {
+              cache.put(event.request, networkResponse.clone());
+            }
+            return networkResponse;
+          })
+          .catch(() => cachedResponse);
+
+        return cachedResponse || fetchPromise;
+      });
+    })
   );
 });
 
-// 3. Handle incoming Web Push payload from Google / Apple / Mozilla / OneSignal fallback
+// 3. Handle incoming Web Push payload from Google / Apple / Mozilla / OneSignal
 self.addEventListener("push", (event) => {
   let data = {
     title: "GFG CORE TEAM",

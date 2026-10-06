@@ -1,3 +1,4 @@
+// src/app/layout.tsx
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "@/app/globals.css";
@@ -7,8 +8,8 @@ import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { OneSignalProvider } from "@/components/OneSignalProvider";
 
 export const metadata: Metadata = {
-  title: "GFG SRMIST Portal | Core Team",
-  description: "GeeksforGeeks SRMIST Student Chapter Portal",
+  title: "GFG CORE TEAM",
+  description: "GeeksforGeeks SRMIST Core Team Portal",
   manifest: "/manifest.json",
   icons: {
     icon: "/gfg.png",
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "GFG SRMIST",
+    title: "GFG CORE TEAM",
   },
 };
 
@@ -39,6 +40,10 @@ export default function RootLayout({
       <head>
         <link rel="icon" href="/gfg.png" sizes="any" />
         <link rel="apple-touch-icon" href="/gfg.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/gfg.png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="GFG CORE TEAM" />
         <Script
           src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"
           strategy="afterInteractive"
