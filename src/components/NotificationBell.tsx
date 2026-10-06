@@ -3,25 +3,18 @@
 import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Bell, Smartphone, Trash2, X, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
-import Link from "next/link";
 
 /**
- * Bulletproof VAPID Base64-to-Uint8Array conversion function.
- * Safely converts Base64/Base64URL public VAPID keys into a valid BufferSource
- * across iOS Safari (PWA) and Android Chrome without throwing atob DOMExceptions.
+ * Robust Base64URL to Uint8Array decoder.
+ * Handles URL-safe base64 (- and _), strips quotes/whitespace, and appends = padding.
  */
 function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
-  // 1. Sanitize the key: strip quotes, spaces, newlines, and trailing characters
   let cleanKey = base64String.trim().replace(/['"]/g, "").replace(/\s+/g, "");
-
-  // 2. Convert Base64URL characters (- and _) to standard Base64 (+ and /)
   cleanKey = cleanKey.replace(/-/g, "+").replace(/_/g, "/");
 
-  // 3. Ensure exact Base64 length padding divisible by 4
   const padLength = (4 - (cleanKey.length % 4)) % 4;
   cleanKey += "=".repeat(padLength);
 
-  // 4. Decode binary string safely using window.atob
   const rawData = window.atob(cleanKey);
   const buffer = new ArrayBuffer(rawData.length);
   const outputArray = new Uint8Array(buffer);
@@ -66,7 +59,6 @@ export function NotificationBell() {
     }
     document.addEventListener("mousedown", handleClickOutside);
 
-    // Real-time listener for newly inserted broadcast notices
     const channel = supabase
       .channel("realtime_notifications")
       .on(
@@ -113,7 +105,7 @@ export function NotificationBell() {
   async function syncPushToken(): Promise<{ success: boolean; error?: string }> {
     try {
       if (!("serviceWorker" in navigator)) {
-        return { success: false, error: "Service Workers are not supported on this device" };
+        return { success: false, error: "Service Workers are not supported" };
       }
 
       await navigator.serviceWorker.register("/sw.js");
@@ -121,7 +113,7 @@ export function NotificationBell() {
 
       const rawVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
       if (!rawVapidKey) {
-        return { success: false, error: "NEXT_PUBLIC_VAPID_PUBLIC_KEY is missing in environment variables" };
+        return { success: false, error: "NEXT_PUBLIC_VAPID_PUBLIC_KEY missing in env" };
       }
 
       const convertedKey = urlBase64ToUint8Array(rawVapidKey);
@@ -136,17 +128,17 @@ export function NotificationBell() {
       }
 
       if (!currentSub) {
-        return { success: false, error: "Browser failed to establish Web Push subscription." };
+        return { success: false, error: "Failed to establish Web Push subscription." };
       }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        return { success: false, error: "User not authenticated in Supabase." };
+        return { success: false, error: "User not authenticated." };
       }
 
       const subJson = currentSub.toJSON();
 
-      // Check existing device records for this user
+      // Query active user endpoints
       const { data: existingSubs } = await supabase
         .from("push_subscriptions")
         .select("id, subscription_json")
@@ -284,7 +276,7 @@ export function NotificationBell() {
           }}
           className="p-2.5 neo-btn rounded-xl relative hover:text-emerald-500 transition-colors flex items-center justify-center cursor-pointer"
         >
-          <Bell className="w-4 h-4"/>
+          <Bell className="w-4 h-4" />
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 w-5 h-5 bg-emerald-500 text-black font-black text-[10px] rounded-full flex items-center justify-center animate-pulse shadow">
               {unreadCount}
@@ -298,14 +290,14 @@ export function NotificationBell() {
               <h4 className="text-xs font-black uppercase tracking-widest text-emerald-500">Live Alerts</h4>
               {notifications.length > 0 && (
                 <button onClick={deleteAllNotifications} className="text-[9px] font-bold opacity-60 hover:opacity-100 flex items-center gap-1 text-rose-500 cursor-pointer">
-                  <Trash2 className="w-3 h-3"/> Clear All
+                  <Trash2 className="w-3 h-3" /> Clear All
                 </button>
               )}
             </div>
 
             {pushEnabled === true ? (
               <div className="w-full py-2 px-3 neo-pressed rounded-xl text-[10px] font-bold text-emerald-500 flex items-center justify-center gap-2 opacity-90">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500"/>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                 <span>Push Alerts Active on this device</span>
               </div>
             ) : (
@@ -314,7 +306,7 @@ export function NotificationBell() {
                 disabled={enabling}
                 className="w-full py-2 px-3 neo-btn rounded-xl text-[10px] font-extrabold uppercase tracking-wider text-emerald-500 flex items-center justify-center gap-2 border border-emerald-500/30 cursor-pointer"
               >
-                {enabling ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Smartphone className="w-3.5 h-3.5"/>}
+                {enabling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Smartphone className="w-3.5 h-3.5" />}
                 <span>{isIosBrowser ? "Add to Home Screen for Alerts" : "Enable Mobile Alerts"}</span>
               </button>
             )}
@@ -327,12 +319,16 @@ export function NotificationBell() {
                   <div key={n.id} className={`p-3 neo-pressed rounded-2xl border-l-2 text-xs space-y-1 transition-all border-emerald-500 bg-emerald-500/5 ${n.type === "reminder" ? "border-amber-500" : ""}`}>
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-bold leading-tight">{n.title}</p>
-                      <button onClick={() => deleteNotification(n.id)} className="p-1 neo-btn rounded-lg text-rose-500 hover:scale-110 cursor-pointer"><X className="w-3.5 h-3.5"/></button>
+                      <button onClick={() => deleteNotification(n.id)} className="p-1 neo-btn rounded-lg text-rose-500 hover:scale-110 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                     </div>
                     <p className="opacity-80 text-[10px] leading-relaxed">{n.message}</p>
                     <div className="flex items-center justify-between pt-1 text-[8px] opacity-50 font-mono">
                       <span>{new Date(n.created_at).toLocaleDateString()}</span>
-                      {n.link && <Link className="text-emerald-500 font-bold hover:underline flex items-center gap-0.5" href={n.link}>View <ExternalLink className="w-2.5 h-2.5"/></Link>}
+                      {n.link && (
+                        <a href={n.link} className="text-emerald-500 font-bold hover:underline flex items-center gap-0.5">
+                          View <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      )}
                     </div>
                   </div>
                 ))
@@ -346,16 +342,16 @@ export function NotificationBell() {
         <div className="fixed bottom-20 right-6 z-50 max-w-xs w-full p-4 neo-flat rounded-2xl bg-[var(--bg-base)] border border-emerald-500/40 shadow-2xl animate-in slide-in-from-bottom-5">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 text-emerald-500 font-extrabold text-xs">
-              <Smartphone className="w-4 h-4 animate-bounce"/>
+              <Smartphone className="w-4 h-4 animate-bounce" />
               <span>Enable Phone Alerts</span>
             </div>
-            <button onClick={dismissBanner} className="p-1 neo-btn rounded-lg opacity-60 hover:opacity-100 cursor-pointer"><X className="w-3 h-3"/></button>
+            <button onClick={dismissBanner} className="p-1 neo-btn rounded-lg opacity-60 hover:opacity-100 cursor-pointer"><X className="w-3 h-3" /></button>
           </div>
           <p className="text-[10px] opacity-70 mt-1 leading-relaxed">Get instant OS push alerts on your phone for chapter updates and notices.</p>
           <div className="flex gap-2 mt-3">
             <button onClick={dismissBanner} className="w-1/3 py-2 neo-btn rounded-xl text-[9px] font-bold uppercase tracking-wider opacity-60 cursor-pointer">Later</button>
             <button onClick={requestPushPermission} disabled={enabling} className="w-2/3 py-2 neo-btn-green rounded-xl text-[9px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer">
-              {enabling ? <Loader2 className="w-3 h-3 animate-spin"/> : "Enable (1 Tap)"}
+              {enabling ? <Loader2 className="w-3 h-3 animate-spin" /> : "Enable (1 Tap)"}
             </button>
           </div>
         </div>
