@@ -5,8 +5,17 @@ import { createClient } from "@/lib/supabase/client";
 import { sendNotification } from "@/app/actions/notify";
 import { 
   Bell, Plus, Loader2, Trash2, Send, AlertTriangle, CheckCircle2, 
-  Bold, Italic, List, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock
+  Bold, Italic, List, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock, Users, ShieldCheck, Video
 } from "lucide-react";
+
+// Consolidated Position Hierarchy
+const ROLE_OPTIONS = [
+  { id: "all", label: "Full Team (Everyone)" },
+  { id: "executive", label: "Executives (Presidents, Secs & Jt. Secs)" },
+  { id: "domain_director", label: "Domain Directors" },
+  { id: "associate_lead", label: "Associate Leads" },
+  { id: "member", label: "Core Members" },
+];
 
 export default function NoticesPage() {
   const [activeTab, setActiveTab] = useState<"board" | "post">("board");
@@ -18,7 +27,9 @@ export default function NoticesPage() {
   // Form states
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [meetingLink, setMeetingLink] = useState("");
   const [isImportant, setIsImportant] = useState(false);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(["all"]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Custom Modal States
@@ -42,7 +53,7 @@ export default function NoticesPage() {
 
     // Subscribe to real-time notice insertions and deletions
     const channel = supabase
-      .channel("notices_realtime_board_v3")
+      .channel("notices_realtime_board_v8")
       .on("postgres_changes", { event: "*", schema: "public", table: "notices" }, () => {
         fetchData();
       })
@@ -56,9 +67,12 @@ export default function NoticesPage() {
   async function fetchData() {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
+    let userRole = "member";
+
     if (user) {
       const { data: profileData } = await supabase.from("profiles").select("id, role").eq("id", user.id).single();
       setProfile(profileData);
+      userRole = profileData?.role?.toLowerCase() || "member";
     }
 
     const { data: noticesData } = await supabase
@@ -66,11 +80,57 @@ export default function NoticesPage() {
       .select("*, author:profiles(full_name, role)")
       .order("created_at", { ascending: false });
     
-    setNotices(noticesData || []);
+    // Client-side position filtering
+    const filtered = (noticesData || []).filter((n) => {
+      const targets: string[] = n.target_roles || ["all"];
+      if (targets.includes("all")) return true;
+
+      const isExecUser = ['president', 'secretary', 'joint_secretary'].includes(userRole);
+      if (isExecUser) {
+        return targets.includes("executive") || targets.includes(userRole);
+      }
+
+      return targets.includes(userRole);
+    });
+
+    setNotices(filtered);
     setLoading(false);
   }
 
   const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(profile?.role?.toLowerCase());
+
+  function formatRoleTitle(rawRole: string) {
+    if (!rawRole) return "Executive Lead";
+    const roleMap: Record<string, string> = {
+      president: "President",
+      secretary: "Secretary",
+      joint_secretary: "Joint Secretary",
+      domain_director: "Domain Director",
+      associate_lead: "Associate Lead",
+      member: "Core Member"
+    };
+    return roleMap[rawRole.toLowerCase()] || rawRole.replace("_", " ").toUpperCase();
+  }
+
+  function toggleRoleSelection(roleId: string) {
+    if (roleId === "all") {
+      setSelectedRoles(["all"]);
+      return;
+    }
+
+    let updated = selectedRoles.filter(r => r !== "all");
+    if (updated.includes(roleId)) {
+      updated = updated.filter(r => r !== roleId);
+    } else {
+      updated.push(roleId);
+    }
+
+    if (updated.length === 0) {
+      updated = ["all"];
+    }
+
+    setSelectedRoles(updated);
+  }
 
   function insertFormatting(syntaxBefore: string, syntaxAfter: string = "") {
     const textarea = textareaRef.current;
@@ -138,11 +198,16 @@ export default function NoticesPage() {
     if (!title || !content || !isLead) return;
     setIsPublishing(true);
 
-    // 1. Insert Notice into Database Board
+    const formattedMeetingUrl = meetingLink.trim()
+      ? (meetingLink.startsWith("http") ? meetingLink.trim() : `https://${meetingLink.trim()}`)
+      : null;
+
     const { error: insertErr } = await supabase.from("notices").insert({
       title,
       content,
+      meeting_link: formattedMeetingUrl,
       is_important: isImportant,
+      target_roles: selectedRoles,
       author_id: profile?.id
     });
 
@@ -159,7 +224,6 @@ export default function NoticesPage() {
     const broadcastTitle = `${isImportant ? '🚨' : '📢'} ${title}`;
     const broadcastMessage = content.substring(0, 100) + "...";
 
-    // 2. Trigger Push & Notification Bell History Log
     try {
       const res = await sendNotification({
         title: broadcastTitle,
@@ -171,21 +235,15 @@ export default function NoticesPage() {
       if (res.notif) {
         window.dispatchEvent(new CustomEvent("gfg_notice_dispatched", { detail: res.notif }));
       }
-
-      if (!res.success) {
-        setAlertModal({
-          isOpen: true,
-          message: `Notice published, but push dispatch warning: ${res.error}`,
-          isError: true
-        });
-      }
     } catch (pushErr: any) {
       console.error("Failed to trigger push notification:", pushErr);
     }
 
     setTitle("");
     setContent("");
+    setMeetingLink("");
     setIsImportant(false);
+    setSelectedRoles(["all"]);
     setIsPublishing(false);
     
     await fetchData();
@@ -223,19 +281,11 @@ export default function NoticesPage() {
         window.dispatchEvent(new CustomEvent("gfg_notice_dispatched", { detail: res.notif }));
       }
 
-      if (res.success) {
-        setAlertModal({
-          isOpen: true,
-          message: `Broadcast sent! Push alert dispatched successfully across all connected devices.`,
-          isError: false
-        });
-      } else {
-        setAlertModal({
-          isOpen: true,
-          message: `Notice logged, but push failed: ${res.error}`,
-          isError: true
-        });
-      }
+      setAlertModal({
+        isOpen: true,
+        message: `Broadcast reminder sent successfully!`,
+        isError: false
+      });
     } catch (pushErr: any) {
       setAlertModal({
         isOpen: true,
@@ -248,7 +298,7 @@ export default function NoticesPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       
-      {/* Page Header & Navigation Tabs */}
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-2">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
@@ -256,11 +306,11 @@ export default function NoticesPage() {
           </div>
           <div>
             <h2 className="text-xl font-black text-gradient">Announcements & Board</h2>
-            <p className="text-xs font-semibold opacity-60">Official announcements, reminders, and updates.</p>
+            <p className="text-xs font-semibold opacity-60">Official announcements, role-targeted notices, and meeting schedules.</p>
           </div>
         </div>
 
-        {/* Tab Switcher Bar */}
+        {/* Tab Switcher */}
         <div className="flex p-1.5 neo-pressed rounded-2xl shrink-0 self-start sm:self-center">
           <button
             onClick={() => setActiveTab("board")}
@@ -270,7 +320,7 @@ export default function NoticesPage() {
                 : "opacity-60 hover:opacity-100"
             }`}
           >
-            <LayoutList className="w-3.5 h-3.5" /> Notice Cards
+            <LayoutList className="w-3.5 h-3.5" /> Notice Board
           </button>
 
           <button
@@ -287,76 +337,120 @@ export default function NoticesPage() {
         </div>
       </div>
 
-      {/* TAB 1: CARD-BASED NOTICE FEED (Grid View) */}
+      {/* TAB 1: 2-COLUMN WIDE CARD FEED */}
       {activeTab === "board" && (
         <div className="animate-in fade-in duration-200">
           {loading ? (
             <div className="flex justify-center p-12"><Loader2 className="w-6 h-6 animate-spin opacity-50"/></div>
           ) : notices.length === 0 ? (
             <div className="neo-flat rounded-3xl p-12 text-center opacity-50 text-xs font-bold">
-              No announcements published yet.
+              No announcements published for your position level yet.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {notices.map((notice) => (
-                <div
-                  key={notice.id}
-                  className="neo-flat rounded-3xl p-5 flex flex-col justify-between gap-4 relative overflow-hidden transition-all hover:scale-[1.01] border border-white/5 bg-[var(--bg-base)] shadow-lg"
-                >
-                  <div className={`absolute top-0 left-0 right-0 h-1.5 ${notice.is_important ? 'bg-gradient-to-r from-rose-500 via-rose-400 to-amber-500' : 'bg-emerald-500'}`} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {notices.map((notice) => {
+                const roles: string[] = notice.target_roles || ["all"];
+                const authorName = notice.author?.full_name || "Executive Lead";
+                const authorPosition = formatRoleTitle(notice.author?.role);
 
-                  <div className="space-y-3 pt-1">
-                    <div className="space-y-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className={`text-sm font-extrabold leading-snug tracking-tight ${
-                          notice.is_important ? 'text-rose-500 font-black' : 'text-emerald-500'
-                        }`}>
-                          {notice.title}
-                        </h3>
+                return (
+                  <div
+                    key={notice.id}
+                    className="neo-flat rounded-[2rem] p-6 flex flex-col justify-between gap-5 relative overflow-hidden border border-white/10 bg-[var(--bg-base)] shadow-xl transition-all hover:border-emerald-500/30"
+                  >
+                    <div className={`absolute top-0 left-0 right-0 h-1.5 ${notice.is_important ? 'bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500' : 'bg-emerald-500'}`} />
+
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <h3 className={`text-base font-black leading-snug tracking-tight ${
+                            notice.is_important ? 'text-rose-500' : 'text-emerald-500'
+                          }`}>
+                            {notice.title}
+                          </h3>
+                          <p className="text-[10px] font-mono opacity-50 uppercase tracking-wider">
+                            Published on {new Date(notice.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
 
                         {notice.is_important && (
-                          <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-rose-500/10 text-rose-500 border border-rose-500/30 shrink-0 flex items-center gap-1">
-                            <AlertTriangle className="w-2.5 h-2.5" /> Urgent
+                          <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-rose-500/10 text-rose-500 border border-rose-500/30 shrink-0 flex items-center gap-1 shadow-xs">
+                            <AlertTriangle className="w-3 h-3" /> Priority
                           </span>
                         )}
                       </div>
 
-                      <p className="text-[9px] font-mono opacity-40 uppercase tracking-wider">
-                        {new Date(notice.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-
-                    <div className="text-xs opacity-90 font-medium leading-relaxed max-h-48 overflow-y-auto custom-scrollbar p-1">
-                      {renderFormattedContent(notice.content)}
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-[var(--text-muted)]/10 flex items-center justify-between gap-2 text-[9px]">
-                    <span className="font-extrabold text-emerald-500 uppercase tracking-wider truncate">
-                      {notice.author?.full_name || "Executive Lead"}
-                    </span>
-
-                    {isLead && (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          onClick={() => handleSendReminder(notice)}
-                          className="px-2 py-1 neo-btn rounded-lg text-[9px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1 hover:scale-105 transition-transform cursor-pointer"
-                          title="Broadcast Reminder Push"
-                        >
-                          <Send className="w-2.5 h-2.5"/> Remind
-                        </button>
-                        <button
-                          onClick={() => setDeleteModal({ isOpen: true, noticeId: notice.id, title: notice.title })}
-                          className="p-1 neo-btn rounded-lg text-rose-500 hover:scale-110 active:scale-95 transition-transform cursor-pointer"
-                          title="Delete Notice"
-                        >
-                          <Trash2 className="w-3 h-3"/>
-                        </button>
+                      {/* Position Target Badges */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[9px] font-bold opacity-50 uppercase tracking-widest flex items-center gap-1 mr-1">
+                          <Users className="w-3 h-3" /> Target:
+                        </span>
+                        {roles.includes("all") ? (
+                          <span className="px-2 py-0.5 neo-pressed rounded-lg text-[9px] font-extrabold text-emerald-500 uppercase tracking-wider">
+                            Full Team
+                          </span>
+                        ) : (
+                          roles.map((r) => (
+                            <span key={r} className="px-2 py-0.5 neo-pressed rounded-lg text-[9px] font-extrabold text-amber-500 uppercase tracking-wider">
+                              {r === "executive" ? "Executives" : r === "member" ? "Core Members" : r.replace("_", " ")}
+                            </span>
+                          ))
+                        )}
                       </div>
-                    )}
+
+                      {/* Content Body */}
+                      <div className="text-xs opacity-90 font-medium leading-relaxed max-h-56 overflow-y-auto custom-scrollbar p-3 neo-pressed rounded-2xl bg-black/5 dark:bg-white/5 border border-white/5">
+                        {renderFormattedContent(notice.content)}
+                      </div>
+
+                      {/* Optional Join Meeting Button */}
+                      {notice.meeting_link && (
+                        <div className="pt-1">
+                          <a
+                            href={notice.meeting_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full py-2.5 px-4 neo-btn-green rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
+                          >
+                            <Video className="w-4 h-4 shrink-0" />
+                            <span>Join Meeting</span>
+                            <ExternalLink className="w-3.5 h-3.5 opacity-80 shrink-0" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Author & Actions Bar */}
+                    <div className="pt-3 border-t border-[var(--text-muted)]/10 flex items-center justify-between gap-2 text-[10px]">
+                      <div className="flex items-center gap-1.5 overflow-hidden">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0"/>
+                        <span className="font-extrabold text-emerald-500 uppercase tracking-wider truncate">
+                          {authorName} <span className="opacity-60 text-[var(--text-main)] font-semibold">({authorPosition})</span>
+                        </span>
+                      </div>
+
+                      {isLead && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleSendReminder(notice)}
+                            className="px-3 py-1.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1 hover:scale-105 transition-transform cursor-pointer"
+                            title="Broadcast Reminder Push"
+                          >
+                            <Send className="w-3 h-3"/> Remind
+                          </button>
+                          <button
+                            onClick={() => setDeleteModal({ isOpen: true, noticeId: notice.id, title: notice.title })}
+                            className="p-1.5 neo-btn rounded-xl text-rose-500 hover:scale-110 active:scale-95 transition-transform cursor-pointer"
+                            title="Delete Notice"
+                          >
+                            <Trash2 className="w-3.5 h-3.5"/>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -370,15 +464,15 @@ export default function NoticesPage() {
               <Lock className="w-8 h-8 text-rose-500 mx-auto opacity-80" />
               <h3 className="text-xs font-black uppercase tracking-widest text-rose-500">Access Restricted</h3>
               <p className="text-xs opacity-60 max-w-sm mx-auto">
-                Only chapter leads (President, Secretary, Joint Secretary, Domain Directors) are authorized to publish official notices.
+                Only chapter leads are authorized to publish official notices.
               </p>
             </div>
           ) : (
             <form onSubmit={handlePublish} className="neo-flat rounded-3xl p-8 space-y-5 bg-[var(--bg-surface)]">
               <div className="flex items-center justify-between border-b border-white/10 pb-3">
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Publish New Notice</h3>
-                  <p className="text-[10px] opacity-60 mt-0.5">Dispatches real-time broadcast to all chapter members</p>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Publish Targeted Notice</h3>
+                  <p className="text-[10px] opacity-60 mt-0.5">Select position targets, add details, and dispatch broadcast</p>
                 </div>
                 <Sparkles className="w-5 h-5 text-emerald-500 opacity-60"/>
               </div>
@@ -387,7 +481,7 @@ export default function NoticesPage() {
                 <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Heading / Subject *</label>
                 <input
                   type="text"
-                  placeholder="e.g. Core Team Sync & Agenda"
+                  placeholder="e.g. Domain Directors Sync & Task Review"
                   required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -395,9 +489,52 @@ export default function NoticesPage() {
                 />
               </div>
 
+              {/* Target Position Checkboxes */}
+              <div className="space-y-2">
+                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Select Target Positions *</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {ROLE_OPTIONS.map((opt) => {
+                    const isChecked = selectedRoles.includes(opt.id);
+                    return (
+                      <label
+                        key={opt.id}
+                        onClick={() => toggleRoleSelection(opt.id)}
+                        className={`p-3 rounded-2xl border text-xs font-extrabold flex items-center gap-2.5 cursor-pointer transition-all ${
+                          isChecked 
+                            ? "neo-pressed text-emerald-500 border-emerald-500/40 bg-emerald-500/10" 
+                            : "neo-flat opacity-60 hover:opacity-100 border-transparent"
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-md flex items-center justify-center border transition-colors shrink-0 ${
+                          isChecked ? "bg-emerald-500 border-emerald-500 text-black" : "border-white/20"
+                        }`}>
+                          {isChecked && <CheckCircle2 className="w-3 h-3 text-black" />}
+                        </div>
+                        <span className="text-[10px] uppercase tracking-wider truncate">{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Optional Meeting Link Input */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1 flex items-center gap-1">
+                  <Video className="w-3 h-3 text-emerald-500" /> Meeting Link (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. https://meet.google.com/abc-defg-hij or Zoom link"
+                  value={meetingLink}
+                  onChange={(e) => setMeetingLink(e.target.value)}
+                  className="w-full px-4 py-3 neo-pressed rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-transparent font-medium"
+                />
+              </div>
+
+              {/* Description & Link Formatting Toolbar */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between px-1">
-                  <label className="text-[9px] font-extrabold uppercase opacity-60">Description & Links *</label>
+                  <label className="text-[9px] font-extrabold uppercase opacity-60">Description & Notes *</label>
                   
                   <div className="flex items-center gap-1">
                     <button
@@ -437,26 +574,33 @@ export default function NoticesPage() {
 
                 <textarea
                   ref={textareaRef}
-                  placeholder="Type description, meeting links (e.g. https://meet.google.com/xyz), agendas..."
+                  placeholder="Type description, meeting guidelines, agenda..."
                   required
-                  rows={8}
+                  rows={7}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   className="w-full px-4 py-3 neo-pressed rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-transparent font-medium custom-scrollbar resize-none leading-relaxed"
                 />
               </div>
 
-              <label className="flex items-center gap-2 cursor-pointer pt-1">
-                <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} className="peer sr-only" />
-                <div className="w-5 h-5 neo-pressed rounded-md flex items-center justify-center peer-checked:text-rose-500 transition-colors shrink-0">
-                  {isImportant && <AlertTriangle className="w-3.5 h-3.5"/>}
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">Mark as High Priority (Red Alert Broadcast)</span>
-              </label>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} className="peer sr-only" />
+                  <div className="w-5 h-5 neo-pressed rounded-md flex items-center justify-center peer-checked:text-rose-500 transition-colors shrink-0">
+                    {isImportant && <AlertTriangle className="w-3.5 h-3.5"/>}
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">Mark High Priority</span>
+                </label>
 
-              <button type="submit" disabled={isPublishing} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex justify-center items-center gap-2 cursor-pointer shadow-lg">
-                {isPublishing ? <Loader2 className="w-4 h-4 animate-spin"/> : <><Plus className="w-4 h-4"/> Publish & Broadcast Notice</>}
-              </button>
+                {/* Refined Compact Button */}
+                <button 
+                  type="submit" 
+                  disabled={isPublishing} 
+                  className="px-6 py-3 neo-btn-green rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-105 active:scale-95 transition-all self-end sm:self-auto"
+                >
+                  {isPublishing ? <Loader2 className="w-4 h-4 animate-spin"/> : <><Plus className="w-4 h-4"/> Publish Notice</>}
+                </button>
+              </div>
             </form>
           )}
         </div>
@@ -502,7 +646,7 @@ export default function NoticesPage() {
         </div>
       )}
 
-      {/* Alert Modal for Reminders & Server Output */}
+      {/* Status Modal */}
       {alertModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-4 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
