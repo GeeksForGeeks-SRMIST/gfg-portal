@@ -38,7 +38,7 @@ export default function AttendancePage() {
       const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
       setProfile(userProfile);
 
-      if (userProfile?.role === "domain_director") {
+      if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
         setSessionDomain(userProfile.domain);
       }
 
@@ -50,9 +50,12 @@ export default function AttendancePage() {
 
   async function fetchData(userProfile: any) {
     let memberQuery = supabase.from("profiles").select("*").eq("status", "approved");
-    if (userProfile?.role === "domain_director") {
-      memberQuery = memberQuery.eq("domain", userProfile.domain);
+    
+    if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
+      // Fetch domain members AND the core executive board (President, Sec, Jt Sec)
+      memberQuery = memberQuery.or(`domain.eq.${userProfile.domain},role.eq.president,role.eq.secretary,role.eq.joint_secretary`);
     }
+    
     const { data: memberData } = await memberQuery;
     setMembers(memberData || []);
 
@@ -67,7 +70,7 @@ export default function AttendancePage() {
       .select("*, creator:profiles!attendance_sessions_created_by_fkey(full_name, role), attendance_records(*, profiles(full_name, srm_email, reg_number, domain))")
       .order("date", { ascending: false });
 
-    if (userProfile?.role === "domain_director") {
+    if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
       sessionQuery = sessionQuery.or(`domain.eq.${userProfile.domain},domain.eq.all`);
     }
 
@@ -75,14 +78,35 @@ export default function AttendancePage() {
     setSessions(sessionData || []);
   }
 
-  const isGlobalAdmin = ["president", "secretary", "joint_secretary"].includes(profile?.role);
-  const isDomainDirector = profile?.role === "domain_director";
-  const canTakeAttendance = isGlobalAdmin || isDomainDirector;
+  // Expanded permission check: Executives, Directors, Associate Leads, and Global Admins can take attendance
+  const isGlobalAdmin = ["president", "secretary", "joint_secretary", "executive"].includes(profile?.role?.toLowerCase());
+  const isDomainLead = ["domain_director", "associate_lead"].includes(profile?.role?.toLowerCase());
+  const canTakeAttendance = isGlobalAdmin || isDomainLead;
+
+  // DYNAMIC TARGETING: Filter members dynamically based on the selected meeting domain/position
+  const coreRoles = ["president", "secretary", "joint_secretary"];
+  const filteredMembers = members.filter((m) => {
+    // 1. ALWAYS include the Core Board in every single meeting across all domains
+    if (coreRoles.includes(m.role)) return true; 
+    
+    const actualDomain = isDomainLead ? profile.domain : sessionDomain;
+    
+    // 2. If 'all' is selected, include everyone
+    if (actualDomain === "all") return true; 
+    
+    // 3. Handle Position-Based Filters
+    if (actualDomain === "directors") return m.role === "domain_director"; 
+    if (actualDomain === "associates") return m.role === "associate_lead"; 
+    if (actualDomain === "directors_associates") return m.role === "domain_director" || m.role === "associate_lead";
+    
+    // 4. Handle Domain-Based Filters (Technical, Events, Creatives, Executive)
+    return m.domain === actualDomain;
+  });
 
   const toggleAttendance = (userId: string) => {
     setAttendanceMap((prev) => ({
       ...prev,
-      [userId]: !prev[userId]
+      [userId]: !(prev[userId] ?? true)
     }));
   };
 
@@ -95,7 +119,7 @@ export default function AttendancePage() {
 
     setSubmitting(true);
 
-    const sessionDomainValue = isDomainDirector ? profile.domain : sessionDomain;
+    const sessionDomainValue = isDomainLead ? profile.domain : sessionDomain;
 
     const { data: sessionRes, error: sessionErr } = await supabase
       .from("attendance_sessions")
@@ -114,10 +138,11 @@ export default function AttendancePage() {
       return;
     }
 
-    const recordsToInsert = members.map((m) => ({
+    // ONLY insert records for the targeted filtered members
+    const recordsToInsert = filteredMembers.map((m) => ({
       session_id: sessionRes.id,
       user_id: m.id,
-      status: attendanceMap[m.id] ? "present" : "absent"
+      status: (attendanceMap[m.id] ?? true) ? "present" : "absent"
     }));
 
     const { error: recordErr } = await supabase.from("attendance_records").insert(recordsToInsert);
@@ -128,8 +153,8 @@ export default function AttendancePage() {
       return;
     }
 
-    // ROBUST AUTOMATIC 5 MARKS AWARDING & NOTIFICATIONS FOR PRESENT MEMBERS
-    const presentMembers = members.filter(m => attendanceMap[m.id]);
+    // AUTOMATIC 5 MARKS AWARDING & NOTIFICATIONS FOR PRESENT MEMBERS
+    const presentMembers = filteredMembers.filter(m => (attendanceMap[m.id] ?? true));
 
     for (const member of presentMembers) {
       // 1. Insert into points_ledger
@@ -152,7 +177,7 @@ export default function AttendancePage() {
       });
     }
 
-    setAlertModal({ isOpen: true, message: `Attendance successfully recorded! +5 points awarded to ${presentMembers.length} present members.` });
+    setAlertModal({ isOpen: true, message: `Attendance successfully recorded! +5 points awarded to ${presentMembers.length} targeted members.` });
     setSessionTitle("");
     setActiveTab("logs");
     await fetchData(profile);
@@ -278,7 +303,7 @@ export default function AttendancePage() {
                               {session.domain}
                             </span>
                             <span className="text-[10px] opacity-50">{session.date}</span>
-                            <span className="text-[9px] opacity-40">• Taken by {session.creator?.full_name || "Admin"}</span>
+                            <span className="text-[9px] opacity-40">Taken by {session.creator?.full_name || "Admin"}</span>
                           </div>
                           <h4 className="font-extrabold text-sm mt-1">{session.title}</h4>
                         </div>
@@ -348,7 +373,7 @@ export default function AttendancePage() {
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
             <ClipboardList className="w-5 h-5 text-emerald-500" />
             <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500">
-              Take Attendance Sheet {isDomainDirector && `(${profile.domain.toUpperCase()} Domain)`} — Awards +5 PTS
+              Take Attendance Sheet {isDomainLead && `(${profile.domain.toUpperCase()} Domain)`} — Awards +5 PTS
             </h3>
           </div>
 
@@ -379,27 +404,34 @@ export default function AttendancePage() {
 
           {isGlobalAdmin && (
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase opacity-60 px-1">Target Domain</label>
+              <label className="text-[10px] font-bold uppercase opacity-60 px-1">Target Domain / Position</label>
               <select
                 value={sessionDomain}
                 onChange={(e) => setSessionDomain(e.target.value)}
                 className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
               >
                 <option value="all" className="bg-[var(--bg-surface)]">All Domains / General Meet</option>
+                
+                <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">--- By Domain ---</option>
                 <option value="technical" className="bg-[var(--bg-surface)]">Technical Domain</option>
                 <option value="events" className="bg-[var(--bg-surface)]">Events Domain</option>
                 <option value="creatives" className="bg-[var(--bg-surface)]">Creatives Domain</option>
-                <option value="executive" className="bg-[var(--bg-surface)]">Executive Board</option>
+                <option value="executive" className="bg-[var(--bg-surface)]">Executive Domain</option>
+                
+                <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">--- By Position ---</option>
+                <option value="directors" className="bg-[var(--bg-surface)]">Directors Only</option>
+                <option value="associates" className="bg-[var(--bg-surface)]">Associate Leads Only</option>
+                <option value="directors_associates" className="bg-[var(--bg-surface)]">Directors & Associate Leads</option>
               </select>
             </div>
           )}
 
           <div className="space-y-2">
             <label className="text-[10px] font-bold uppercase opacity-60 px-1 block">
-              Mark Member Presence ({members.length} {isDomainDirector ? `${profile.domain} members` : 'total members'}) — Present members earn +5 PTS
+              Targeted Members ({filteredMembers.length}) — Only these members will receive records.
             </label>
             <div className="neo-pressed rounded-xl p-4 max-h-72 overflow-y-auto space-y-2 custom-scrollbar">
-              {members.map((m) => {
+              {filteredMembers.map((m) => {
                 const isPresent = attendanceMap[m.id] ?? true;
                 return (
                   <div key={m.id} onClick={() => toggleAttendance(m.id)} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors">
@@ -423,6 +455,9 @@ export default function AttendancePage() {
                   </div>
                 );
               })}
+              {filteredMembers.length === 0 && (
+                <p className="text-xs opacity-50 text-center py-6">No members found for this target group.</p>
+              )}
             </div>
           </div>
 
