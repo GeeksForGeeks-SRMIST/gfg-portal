@@ -54,21 +54,16 @@ export default function AttendancePage() {
   const isInitialLoad = useRef(true);
 
   const fetchData = useCallback(
-    async (userProfile: any, showLoading = false) => {
+    async (showLoading = false) => {
       if (showLoading) setLoading(true);
       try {
-        const userRole = normalizeRole(userProfile?.role);
-        const isDomainSpecific = ["domain_director", "associate_lead", "domain_lead", "director"].includes(userRole);
+        // Fetch ALL approved chapter members
+        const { data: memberData } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("status", "approved")
+          .order("full_name", { ascending: true });
 
-        let memberQuery = supabase.from("profiles").select("*").eq("status", "approved");
-
-        if (isDomainSpecific && userProfile?.domain) {
-          memberQuery = memberQuery.or(
-            `domain.eq.${userProfile.domain},role.eq.president,role.eq.secretary,role.eq.joint_secretary,role.eq.admin`
-          );
-        }
-
-        const { data: memberData } = await memberQuery;
         setMembers(memberData || []);
 
         const initialMap: Record<string, boolean> = {};
@@ -77,18 +72,14 @@ export default function AttendancePage() {
         });
         setAttendanceMap((prev) => (Object.keys(prev).length === 0 ? initialMap : prev));
 
-        let sessionQuery = supabase
+        // Fetch ALL attendance sessions across domains
+        const { data: sessionData } = await supabase
           .from("attendance_sessions")
           .select(
             "*, creator:profiles!attendance_sessions_created_by_fkey(full_name, role), attendance_records(*, profiles(full_name, srm_email, reg_number, domain))"
           )
           .order("date", { ascending: false });
 
-        if (isDomainSpecific && userProfile?.domain) {
-          sessionQuery = sessionQuery.or(`domain.eq.${userProfile.domain},domain.eq.all`);
-        }
-
-        const { data: sessionData } = await sessionQuery;
         setSessions(sessionData || []);
       } finally {
         if (showLoading) setLoading(false);
@@ -105,16 +96,16 @@ export default function AttendancePage() {
       } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+      const { data: userProfile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
       setProfile(userProfile);
       userProfileRef.current = userProfile;
 
-      const userRole = normalizeRole(userProfile?.role);
-      if (["domain_director", "associate_lead", "domain_lead", "director"].includes(userRole) && userProfile?.domain) {
-        setSessionDomain(userProfile.domain);
-      }
-
-      await fetchData(userProfile, isInitialLoad.current);
+      await fetchData(isInitialLoad.current);
       setLoading(false);
       isInitialLoad.current = false;
     }
@@ -128,18 +119,14 @@ export default function AttendancePage() {
         "postgres_changes",
         { event: "*", schema: "public", table: "attendance_sessions" },
         () => {
-          if (userProfileRef.current) {
-            fetchData(userProfileRef.current, false);
-          }
+          fetchData(false);
         }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "attendance_records" },
         () => {
-          if (userProfileRef.current) {
-            fetchData(userProfileRef.current, false);
-          }
+          fetchData(false);
         }
       )
       .subscribe();
@@ -180,29 +167,30 @@ export default function AttendancePage() {
     }
   }
 
-  // Expanded permission checks with role normalization
+  // Permission: Everyone except regular members can take attendance
   const currentRole = normalizeRole(profile?.role);
-  const isGlobalAdmin = ["president", "secretary", "joint_secretary", "executive", "admin", "lead", "vice_president"].includes(
-    currentRole
+  const canTakeAttendance = Boolean(
+    currentRole &&
+      currentRole !== "member" &&
+      currentRole !== "user" &&
+      currentRole !== "student"
   );
-  const isDomainLead = ["domain_director", "associate_lead", "domain_lead", "director"].includes(currentRole);
-  const canTakeAttendance = isGlobalAdmin || isDomainLead;
 
-  // DYNAMIC TARGETING
+  // Dynamic targeting filter based on selected domain/position
   const coreRoles = ["president", "secretary", "joint_secretary", "admin"];
   const filteredMembers = members.filter((m) => {
     const memberRole = normalizeRole(m.role);
     if (coreRoles.includes(memberRole)) return true;
 
-    const actualDomain = isDomainLead ? profile?.domain : sessionDomain;
-
-    if (actualDomain === "all") return true;
-    if (actualDomain === "directors") return ["domain_director", "director"].includes(memberRole);
-    if (actualDomain === "associates") return ["associate_lead", "associate"].includes(memberRole);
-    if (actualDomain === "directors_associates")
+    if (sessionDomain === "all") return true;
+    if (sessionDomain === "directors")
+      return ["domain_director", "director"].includes(memberRole);
+    if (sessionDomain === "associates")
+      return ["associate_lead", "associate"].includes(memberRole);
+    if (sessionDomain === "directors_associates")
       return ["domain_director", "director", "associate_lead", "associate"].includes(memberRole);
 
-    return m.domain?.toLowerCase() === actualDomain?.toLowerCase();
+    return m.domain?.toLowerCase() === sessionDomain?.toLowerCase();
   });
 
   const toggleAttendance = (userId: string) => {
@@ -221,13 +209,11 @@ export default function AttendancePage() {
 
     setSubmitting(true);
 
-    const sessionDomainValue = isDomainLead ? profile?.domain || "all" : sessionDomain;
-
     const { data: sessionRes, error: sessionErr } = await supabase
       .from("attendance_sessions")
       .insert({
         title: sessionTitle,
-        domain: sessionDomainValue,
+        domain: sessionDomain,
         date: sessionDate,
         created_by: profile.id,
       })
@@ -240,7 +226,7 @@ export default function AttendancePage() {
       return;
     }
 
-    // Insert records for targeted members only
+    // Insert records for targeted members
     const recordsToInsert = filteredMembers.map((m) => ({
       session_id: sessionRes.id,
       user_id: m.id,
@@ -285,7 +271,7 @@ export default function AttendancePage() {
     });
     setSessionTitle("");
     setActiveTab("logs");
-    await fetchData(profile, false);
+    await fetchData(false);
     setSubmitting(false);
   }
 
@@ -312,7 +298,7 @@ export default function AttendancePage() {
           rpcRes?.points_reversed || 0
         } points records reversed)`,
       });
-      await fetchData(profile, false);
+      await fetchData(false);
     }
   }
 
@@ -325,7 +311,12 @@ export default function AttendancePage() {
   const myAbsences = totalMySessions - myPresent;
 
   if (loading) {
-    return <div className="p-10 text-center opacity-50 text-xs">Loading attendance portal...</div>;
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-2 text-xs font-semibold opacity-70">
+        <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+        <span>Loading attendance portal...</span>
+      </div>
+    );
   }
 
   return (
@@ -491,7 +482,7 @@ export default function AttendancePage() {
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
             <ClipboardList className="w-5 h-5 text-emerald-500" />
             <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500">
-              Take Attendance Sheet {isDomainLead && `(${profile?.domain?.toUpperCase() || ""} Domain)`} — Awards +5 PTS
+              Take Attendance Sheet — Awards +5 PTS
             </h3>
           </div>
 
@@ -520,49 +511,48 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          {isGlobalAdmin && (
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase opacity-60 px-1">Target Domain / Position</label>
-              <select
-                value={sessionDomain}
-                onChange={(e) => setSessionDomain(e.target.value)}
-                className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
-              >
-                <option value="all" className="bg-[var(--bg-surface)]">
-                  All Domains / General Meet
-                </option>
+          {/* Unified Domain / Position Selector for All Authorized Roles */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase opacity-60 px-1">Target Domain / Position</label>
+            <select
+              value={sessionDomain}
+              onChange={(e) => setSessionDomain(e.target.value)}
+              className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+            >
+              <option value="all" className="bg-[var(--bg-surface)]">
+                All Domains / General Meet
+              </option>
 
-                <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">
-                  --- By Domain ---
-                </option>
-                <option value="technical" className="bg-[var(--bg-surface)]">
-                  Technical Domain
-                </option>
-                <option value="events" className="bg-[var(--bg-surface)]">
-                  Events Domain
-                </option>
-                <option value="creatives" className="bg-[var(--bg-surface)]">
-                  Creatives Domain
-                </option>
-                <option value="executive" className="bg-[var(--bg-surface)]">
-                  Executive Domain
-                </option>
+              <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">
+                --- By Domain ---
+              </option>
+              <option value="technical" className="bg-[var(--bg-surface)]">
+                Technical Domain
+              </option>
+              <option value="events" className="bg-[var(--bg-surface)]">
+                Events Domain
+              </option>
+              <option value="creatives" className="bg-[var(--bg-surface)]">
+                Creatives Domain
+              </option>
+              <option value="executive" className="bg-[var(--bg-surface)]">
+                Executive Domain
+              </option>
 
-                <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">
-                  --- By Position ---
-                </option>
-                <option value="directors" className="bg-[var(--bg-surface)]">
-                  Directors Only
-                </option>
-                <option value="associates" className="bg-[var(--bg-surface)]">
-                  Associate Leads Only
-                </option>
-                <option value="directors_associates" className="bg-[var(--bg-surface)]">
-                  Directors & Associate Leads
-                </option>
-              </select>
-            </div>
-          )}
+              <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">
+                --- By Position ---
+              </option>
+              <option value="directors" className="bg-[var(--bg-surface)]">
+                Directors Only
+              </option>
+              <option value="associates" className="bg-[var(--bg-surface)]">
+                Associate Leads Only
+              </option>
+              <option value="directors_associates" className="bg-[var(--bg-surface)]">
+                Directors & Associate Leads
+              </option>
+            </select>
+          </div>
 
           <div className="space-y-2">
             <label className="text-[10px] font-bold uppercase opacity-60 px-1 block">
@@ -616,7 +606,14 @@ export default function AttendancePage() {
             disabled={submitting}
             className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer"
           >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Save Attendance & Award 5 PTS</>}
+            {submitting ? (
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Recording & Awarding Points...</span>
+              </div>
+            ) : (
+              <>Save Attendance & Award 5 PTS</>
+            )}
           </button>
         </form>
       )}
