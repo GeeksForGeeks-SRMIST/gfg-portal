@@ -23,10 +23,11 @@ export function ServiceWorkerRegister() {
       .register("/sw.js", { updateViaCache: "none" })
       .then((reg) => {
         registration = reg;
+        reg.update().catch(() => {});
 
         setInterval(() => {
           reg.update().catch(() => {});
-        }, 1000 * 60 * 5);
+        }, 1000 * 60 * 2);
       })
       .catch((err) => console.error("Service worker registration failed:", err));
 

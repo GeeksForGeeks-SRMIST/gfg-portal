@@ -1,6 +1,6 @@
 // public/sw.js
 
-const ICON_CACHE_NAME = "gfg-icon-v1";
+const ICON_CACHE_NAME = "gfg-icon-v2";
 
 // 1. Instantly activate updated service worker without waiting
 self.addEventListener("install", (event) => {
@@ -9,25 +9,28 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== ICON_CACHE_NAME) {
-            return caches.delete(cache);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((cacheNames) => {
+        return Promise.all(
+          cacheNames.map((cache) => {
+            if (cache !== ICON_CACHE_NAME) {
+              return caches.delete(cache);
+            }
+          })
+        );
+      })
+      .then(() => self.clients.claim())
   );
 });
 
-// 2. Selective Fetch Strategy: Cache ONLY icons/manifests, let everything else pass through
+// 2. Selective Fetch Strategy: Cache ONLY icons/manifests, let everything else pass directly to network
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   const url = new URL(event.request.url);
 
-  // ONLY intercept icon and manifest requests
+  // ONLY intercept static icon and manifest requests
   const isAppIcon =
     url.pathname.includes("gfg") ||
     url.pathname.includes("icon") ||
@@ -36,7 +39,7 @@ self.addEventListener("fetch", (event) => {
     url.pathname.endsWith(".ico");
 
   if (!isAppIcon || url.origin !== self.location.origin) {
-    // Let Next.js, API routes, and JavaScript chunks load directly from network without caching
+    // Let Next.js app pages, API routes, and JavaScript chunks load directly from network without caching
     return;
   }
 
@@ -93,9 +96,7 @@ self.addEventListener("push", (event) => {
     },
   };
 
-  event.waitUntil(
-    self.registration.showNotification(data.title, options)
-  );
+  event.waitUntil(self.registration.showNotification(data.title, options));
 });
 
 // 4. Handle notification click on phone/desktop OS

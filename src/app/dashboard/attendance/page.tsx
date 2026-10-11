@@ -1,8 +1,23 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { CalendarCheck, CheckCircle2, XCircle, Users, ClipboardList, Loader2, Trash2, AlertTriangle } from "lucide-react";
+import {
+  CalendarCheck,
+  CheckCircle2,
+  XCircle,
+  Users,
+  ClipboardList,
+  Loader2,
+  Trash2,
+  AlertTriangle,
+} from "lucide-react";
+
+// Helper function to normalize user role strings safely
+function normalizeRole(role?: string | null): string {
+  if (!role) return "";
+  return role.toLowerCase().trim().replace(/[\s-]+/g, "_");
+}
 
 export default function AttendancePage() {
   const [profile, setProfile] = useState<any>(null);
@@ -20,10 +35,17 @@ export default function AttendancePage() {
 
   // Custom Modal States
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
-    isOpen: false, message: ""
+    isOpen: false,
+    message: "",
   });
-  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; sessionId: string | null; title: string }>({
-    isOpen: false, sessionId: null, title: ""
+  const [deleteModal, setDeleteModal] = useState<{
+    isOpen: boolean;
+    sessionId: string | null;
+    title: string;
+  }>({
+    isOpen: false,
+    sessionId: null,
+    title: "",
   });
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -31,17 +53,64 @@ export default function AttendancePage() {
   const userProfileRef = useRef<any>(null);
   const isInitialLoad = useRef(true);
 
+  const fetchData = useCallback(
+    async (userProfile: any, showLoading = false) => {
+      if (showLoading) setLoading(true);
+      try {
+        const userRole = normalizeRole(userProfile?.role);
+        const isDomainSpecific = ["domain_director", "associate_lead", "domain_lead", "director"].includes(userRole);
+
+        let memberQuery = supabase.from("profiles").select("*").eq("status", "approved");
+
+        if (isDomainSpecific && userProfile?.domain) {
+          memberQuery = memberQuery.or(
+            `domain.eq.${userProfile.domain},role.eq.president,role.eq.secretary,role.eq.joint_secretary,role.eq.admin`
+          );
+        }
+
+        const { data: memberData } = await memberQuery;
+        setMembers(memberData || []);
+
+        const initialMap: Record<string, boolean> = {};
+        memberData?.forEach((m) => {
+          initialMap[m.id] = true;
+        });
+        setAttendanceMap((prev) => (Object.keys(prev).length === 0 ? initialMap : prev));
+
+        let sessionQuery = supabase
+          .from("attendance_sessions")
+          .select(
+            "*, creator:profiles!attendance_sessions_created_by_fkey(full_name, role), attendance_records(*, profiles(full_name, srm_email, reg_number, domain))"
+          )
+          .order("date", { ascending: false });
+
+        if (isDomainSpecific && userProfile?.domain) {
+          sessionQuery = sessionQuery.or(`domain.eq.${userProfile.domain},domain.eq.all`);
+        }
+
+        const { data: sessionData } = await sessionQuery;
+        setSessions(sessionData || []);
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [supabase]
+  );
+
   useEffect(() => {
     async function load() {
       if (isInitialLoad.current) setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) return;
 
       const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
       setProfile(userProfile);
       userProfileRef.current = userProfile;
 
-      if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
+      const userRole = normalizeRole(userProfile?.role);
+      if (["domain_director", "associate_lead", "domain_lead", "director"].includes(userRole) && userProfile?.domain) {
         setSessionDomain(userProfile.domain);
       }
 
@@ -51,7 +120,7 @@ export default function AttendancePage() {
     }
     load();
 
-    // REALTIME SUBSCRIPTION FOR AUTOMATIC NO-REFRESH UPDATES WITHOUT FLICKERING
+    // REALTIME SUBSCRIPTION FOR AUTOMATIC NO-REFRESH UPDATES
     const channelName = `realtime_attendance_page_${Math.random().toString(36).substring(7)}`;
     const channel = supabase
       .channel(channelName)
@@ -78,58 +147,32 @@ export default function AttendancePage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
-
-  async function fetchData(userProfile: any, showLoading = false) {
-    if (showLoading) setLoading(true);
-    try {
-      let memberQuery = supabase.from("profiles").select("*").eq("status", "approved");
-      
-      if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
-        memberQuery = memberQuery.or(`domain.eq.${userProfile.domain},role.eq.president,role.eq.secretary,role.eq.joint_secretary`);
-      }
-      
-      const { data: memberData } = await memberQuery;
-      setMembers(memberData || []);
-
-      const initialMap: Record<string, boolean> = {};
-      memberData?.forEach((m) => {
-        initialMap[m.id] = true;
-      });
-      setAttendanceMap(initialMap);
-
-      let sessionQuery = supabase
-        .from("attendance_sessions")
-        .select("*, creator:profiles!attendance_sessions_created_by_fkey(full_name, role), attendance_records(*, profiles(full_name, srm_email, reg_number, domain))")
-        .order("date", { ascending: false });
-
-      if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
-        sessionQuery = sessionQuery.or(`domain.eq.${userProfile.domain},domain.eq.all`);
-      }
-
-      const { data: sessionData } = await sessionQuery;
-      setSessions(sessionData || []);
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  }
+  }, [fetchData, supabase]);
 
   // Helper for OneSignal Device Push Notifications
-  async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/attendance") {
+  async function triggerPushNotification(
+    title: string,
+    message: string,
+    targetUserId: string | null = null,
+    link: string = "/dashboard/attendance"
+  ) {
     try {
       await fetch("/api/webhooks/push", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+          Authorization: `Bearer ${
+            process.env.NEXT_PUBLIC_WEBHOOK_SECRET ||
+            "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"
+          }`,
         },
         body: JSON.stringify({
           record: {
             title,
             message,
             link,
-            target_user_id: targetUserId
-          }
+            target_user_id: targetUserId,
+          },
         }),
       });
     } catch (err) {
@@ -137,30 +180,35 @@ export default function AttendancePage() {
     }
   }
 
-  // Expanded permission check
-  const isGlobalAdmin = ["president", "secretary", "joint_secretary", "executive"].includes(profile?.role?.toLowerCase());
-  const isDomainLead = ["domain_director", "associate_lead"].includes(profile?.role?.toLowerCase());
+  // Expanded permission checks with role normalization
+  const currentRole = normalizeRole(profile?.role);
+  const isGlobalAdmin = ["president", "secretary", "joint_secretary", "executive", "admin", "lead", "vice_president"].includes(
+    currentRole
+  );
+  const isDomainLead = ["domain_director", "associate_lead", "domain_lead", "director"].includes(currentRole);
   const canTakeAttendance = isGlobalAdmin || isDomainLead;
 
   // DYNAMIC TARGETING
-  const coreRoles = ["president", "secretary", "joint_secretary"];
+  const coreRoles = ["president", "secretary", "joint_secretary", "admin"];
   const filteredMembers = members.filter((m) => {
-    if (coreRoles.includes(m.role)) return true; 
-    
-    const actualDomain = isDomainLead ? profile.domain : sessionDomain;
-    
-    if (actualDomain === "all") return true; 
-    if (actualDomain === "directors") return m.role === "domain_director"; 
-    if (actualDomain === "associates") return m.role === "associate_lead"; 
-    if (actualDomain === "directors_associates") return m.role === "domain_director" || m.role === "associate_lead";
-    
-    return m.domain === actualDomain;
+    const memberRole = normalizeRole(m.role);
+    if (coreRoles.includes(memberRole)) return true;
+
+    const actualDomain = isDomainLead ? profile?.domain : sessionDomain;
+
+    if (actualDomain === "all") return true;
+    if (actualDomain === "directors") return ["domain_director", "director"].includes(memberRole);
+    if (actualDomain === "associates") return ["associate_lead", "associate"].includes(memberRole);
+    if (actualDomain === "directors_associates")
+      return ["domain_director", "director", "associate_lead", "associate"].includes(memberRole);
+
+    return m.domain?.toLowerCase() === actualDomain?.toLowerCase();
   });
 
   const toggleAttendance = (userId: string) => {
     setAttendanceMap((prev) => ({
       ...prev,
-      [userId]: !(prev[userId] ?? true)
+      [userId]: !(prev[userId] ?? true),
     }));
   };
 
@@ -173,7 +221,7 @@ export default function AttendancePage() {
 
     setSubmitting(true);
 
-    const sessionDomainValue = isDomainLead ? profile.domain : sessionDomain;
+    const sessionDomainValue = isDomainLead ? profile?.domain || "all" : sessionDomain;
 
     const { data: sessionRes, error: sessionErr } = await supabase
       .from("attendance_sessions")
@@ -181,7 +229,7 @@ export default function AttendancePage() {
         title: sessionTitle,
         domain: sessionDomainValue,
         date: sessionDate,
-        created_by: profile.id
+        created_by: profile.id,
       })
       .select()
       .single();
@@ -196,7 +244,7 @@ export default function AttendancePage() {
     const recordsToInsert = filteredMembers.map((m) => ({
       session_id: sessionRes.id,
       user_id: m.id,
-      status: (attendanceMap[m.id] ?? true) ? "present" : "absent"
+      status: (attendanceMap[m.id] ?? true) ? "present" : "absent",
     }));
 
     const { error: recordErr } = await supabase.from("attendance_records").insert(recordsToInsert);
@@ -207,15 +255,15 @@ export default function AttendancePage() {
       return;
     }
 
-    // AUTOMATIC 5 MARKS AWARDING & REAL-TIME ONESIGNAL NOTIFICATIONS
-    const presentMembers = filteredMembers.filter(m => (attendanceMap[m.id] ?? true));
+    // AUTOMATIC 5 MARKS AWARDING & REAL-TIME NOTIFICATIONS
+    const presentMembers = filteredMembers.filter((m) => attendanceMap[m.id] ?? true);
     const ledgerReason = `Attendance: ${sessionTitle} (${sessionDate})`;
 
     for (const member of presentMembers) {
       await supabase.from("points_ledger").insert({
         profile_id: member.id,
         points_awarded: 5,
-        reason: ledgerReason
+        reason: ledgerReason,
       });
 
       const notifTitle = `✅ Attendance Marked: +5 PTS!`;
@@ -224,15 +272,17 @@ export default function AttendancePage() {
       await supabase.from("notifications").insert({
         title: notifTitle,
         message: notifMsg,
-        target_user_id: member.id,
-        type: "task"
+        user_id: member.id,
+        type: "task",
       });
 
-      // Dispatch OneSignal push notification
       await triggerPushNotification(notifTitle, notifMsg, member.id);
     }
 
-    setAlertModal({ isOpen: true, message: `Attendance successfully recorded! +5 points awarded and real-time push notifications sent to ${presentMembers.length} targeted members.` });
+    setAlertModal({
+      isOpen: true,
+      message: `Attendance successfully recorded! +5 points awarded and real-time push notifications sent to ${presentMembers.length} targeted members.`,
+    });
     setSessionTitle("");
     setActiveTab("logs");
     await fetchData(profile, false);
@@ -243,10 +293,9 @@ export default function AttendancePage() {
     if (!deleteModal.sessionId) return;
     setIsDeleting(true);
 
-    const { data: rpcRes, error: rpcErr } = await supabase.rpc(
-      "delete_attendance_session_cascade",
-      { p_session_id: deleteModal.sessionId }
-    );
+    const { data: rpcRes, error: rpcErr } = await supabase.rpc("delete_attendance_session_cascade", {
+      p_session_id: deleteModal.sessionId,
+    });
 
     setIsDeleting(false);
     setDeleteModal({ isOpen: false, sessionId: null, title: "" });
@@ -259,14 +308,18 @@ export default function AttendancePage() {
     } else {
       setAlertModal({
         isOpen: true,
-        message: `Attendance session and awarded points deleted successfully! (${rpcRes?.points_reversed || 0} points records reversed)`,
+        message: `Attendance session and awarded points deleted successfully! (${
+          rpcRes?.points_reversed || 0
+        } points records reversed)`,
       });
       await fetchData(profile, false);
     }
   }
 
   const mySessions = sessions.filter((s) => s.attendance_records?.some((r: any) => r.user_id === profile?.id));
-  const myPresent = mySessions.filter((s) => s.attendance_records?.find((r: any) => r.user_id === profile?.id)?.status === "present").length;
+  const myPresent = mySessions.filter(
+    (s) => s.attendance_records?.find((r: any) => r.user_id === profile?.id)?.status === "present"
+  ).length;
   const totalMySessions = mySessions.length;
   const attendanceRate = totalMySessions > 0 ? Math.round((myPresent / totalMySessions) * 100) : 100;
   const myAbsences = totalMySessions - myPresent;
@@ -277,7 +330,6 @@ export default function AttendancePage() {
 
   return (
     <div className="space-y-6">
-      
       {/* Header & Tab Selector */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-2">
         <div className="flex items-center gap-3">
@@ -295,14 +347,18 @@ export default function AttendancePage() {
         <div className="flex gap-2">
           <button
             onClick={() => setActiveTab("logs")}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "logs" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeTab === "logs" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"
+            }`}
           >
             Session Records
           </button>
           {canTakeAttendance && (
             <button
               onClick={() => setActiveTab("take")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "take" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"}`}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "take" ? "neo-pressed text-emerald-500" : "neo-btn opacity-70"
+              }`}
             >
               Take Attendance
             </button>
@@ -320,7 +376,9 @@ export default function AttendancePage() {
               <p className="text-[10px] font-bold uppercase tracking-widest opacity-60">Attendance Rate</p>
             </div>
             <div className="neo-flat rounded-2xl p-6 text-center space-y-1">
-              <p className="text-2xl font-black text-gradient">{myPresent}/{totalMySessions}</p>
+              <p className="text-2xl font-black text-gradient">
+                {myPresent}/{totalMySessions}
+              </p>
               <p className="text-[10px] font-bold uppercase tracking-widest opacity-60">Meetings Attended</p>
             </div>
             <div className="neo-flat rounded-2xl p-6 text-center space-y-1">
@@ -353,7 +411,9 @@ export default function AttendancePage() {
                               {session.domain}
                             </span>
                             <span className="text-[10px] opacity-50">{session.date}</span>
-                            <span className="text-[9px] opacity-40">Taken by {session.creator?.full_name || "Admin"}</span>
+                            <span className="text-[9px] opacity-40">
+                              Taken by {session.creator?.full_name || "Admin"}
+                            </span>
                           </div>
                           <h4 className="font-extrabold text-sm mt-1">{session.title}</h4>
                         </div>
@@ -363,7 +423,9 @@ export default function AttendancePage() {
                           </div>
                           {canTakeAttendance && (
                             <button
-                              onClick={() => setDeleteModal({ isOpen: true, sessionId: session.id, title: session.title })}
+                              onClick={() =>
+                                setDeleteModal({ isOpen: true, sessionId: session.id, title: session.title })
+                              }
                               className="p-2 rounded-xl text-rose-500 neo-btn hover:scale-105 transition-all cursor-pointer"
                               title="Delete Attendance Record"
                             >
@@ -381,7 +443,10 @@ export default function AttendancePage() {
                           </p>
                           <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar pr-1">
                             {presentList.map((rec: any) => (
-                              <div key={rec.id} className="flex items-center justify-between text-[11px] py-0.5 px-2 rounded hover:bg-emerald-500/10">
+                              <div
+                                key={rec.id}
+                                className="flex items-center justify-between text-[11px] py-0.5 px-2 rounded hover:bg-emerald-500/10"
+                              >
                                 <span className="font-semibold">{rec.profiles?.full_name}</span>
                                 <span className="text-[9px] opacity-50 uppercase">{rec.profiles?.reg_number}</span>
                               </div>
@@ -399,7 +464,10 @@ export default function AttendancePage() {
                               <p className="text-[11px] opacity-40 italic px-2">No absences recorded.</p>
                             ) : (
                               absentList.map((rec: any) => (
-                                <div key={rec.id} className="flex items-center justify-between text-[11px] py-0.5 px-2 rounded hover:bg-rose-500/10">
+                                <div
+                                  key={rec.id}
+                                  className="flex items-center justify-between text-[11px] py-0.5 px-2 rounded hover:bg-rose-500/10"
+                                >
                                   <span className="font-semibold">{rec.profiles?.full_name}</span>
                                   <span className="text-[9px] opacity-50 uppercase">{rec.profiles?.reg_number}</span>
                                 </div>
@@ -423,7 +491,7 @@ export default function AttendancePage() {
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
             <ClipboardList className="w-5 h-5 text-emerald-500" />
             <h3 className="text-xs font-extrabold uppercase tracking-widest text-emerald-500">
-              Take Attendance Sheet {isDomainLead && `(${profile.domain.toUpperCase()} Domain)`} — Awards +5 PTS
+              Take Attendance Sheet {isDomainLead && `(${profile?.domain?.toUpperCase() || ""} Domain)`} — Awards +5 PTS
             </h3>
           </div>
 
@@ -460,18 +528,38 @@ export default function AttendancePage() {
                 onChange={(e) => setSessionDomain(e.target.value)}
                 className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
               >
-                <option value="all" className="bg-[var(--bg-surface)]">All Domains / General Meet</option>
-                
-                <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">--- By Domain ---</option>
-                <option value="technical" className="bg-[var(--bg-surface)]">Technical Domain</option>
-                <option value="events" className="bg-[var(--bg-surface)]">Events Domain</option>
-                <option value="creatives" className="bg-[var(--bg-surface)]">Creatives Domain</option>
-                <option value="executive" className="bg-[var(--bg-surface)]">Executive Domain</option>
-                
-                <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">--- By Position ---</option>
-                <option value="directors" className="bg-[var(--bg-surface)]">Directors Only</option>
-                <option value="associates" className="bg-[var(--bg-surface)]">Associate Leads Only</option>
-                <option value="directors_associates" className="bg-[var(--bg-surface)]">Directors & Associate Leads</option>
+                <option value="all" className="bg-[var(--bg-surface)]">
+                  All Domains / General Meet
+                </option>
+
+                <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">
+                  --- By Domain ---
+                </option>
+                <option value="technical" className="bg-[var(--bg-surface)]">
+                  Technical Domain
+                </option>
+                <option value="events" className="bg-[var(--bg-surface)]">
+                  Events Domain
+                </option>
+                <option value="creatives" className="bg-[var(--bg-surface)]">
+                  Creatives Domain
+                </option>
+                <option value="executive" className="bg-[var(--bg-surface)]">
+                  Executive Domain
+                </option>
+
+                <option disabled className="bg-[var(--bg-surface)] font-bold text-emerald-500">
+                  --- By Position ---
+                </option>
+                <option value="directors" className="bg-[var(--bg-surface)]">
+                  Directors Only
+                </option>
+                <option value="associates" className="bg-[var(--bg-surface)]">
+                  Associate Leads Only
+                </option>
+                <option value="directors_associates" className="bg-[var(--bg-surface)]">
+                  Directors & Associate Leads
+                </option>
               </select>
             </div>
           )}
@@ -484,20 +572,32 @@ export default function AttendancePage() {
               {filteredMembers.map((m) => {
                 const isPresent = attendanceMap[m.id] ?? true;
                 return (
-                  <div key={m.id} onClick={() => toggleAttendance(m.id)} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors">
+                  <div
+                    key={m.id}
+                    onClick={() => toggleAttendance(m.id)}
+                    className="flex items-center justify-between p-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                  >
                     <div className="flex items-center gap-3">
                       <div className="w-7 h-7 rounded-full neo-pressed overflow-hidden flex items-center justify-center shrink-0">
-                        {m.avatar_path ? <img src={m.avatar_path} alt="" className="w-full h-full object-cover" /> : <Users className="w-3.5 h-3.5 opacity-40" />}
+                        {m.avatar_path ? (
+                          <img src={m.avatar_path} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <Users className="w-3.5 h-3.5 opacity-40" />
+                        )}
                       </div>
                       <div>
                         <p className="font-bold text-xs">{m.full_name}</p>
-                        <p className="text-[9px] opacity-50 uppercase">{m.domain} • {m.reg_number}</p>
+                        <p className="text-[9px] opacity-50 uppercase">
+                          {m.domain || "Core"} • {m.reg_number || m.role}
+                        </p>
                       </div>
                     </div>
                     <button
                       type="button"
                       className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                        isPresent ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30" : "bg-rose-500/20 text-rose-500 border border-rose-500/30"
+                        isPresent
+                          ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+                          : "bg-rose-500/20 text-rose-500 border border-rose-500/30"
                       }`}
                     >
                       {isPresent ? "Present (+5 PTS)" : "Absent"}
@@ -511,7 +611,11 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          <button type="submit" disabled={submitting} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer"
+          >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Save Attendance & Award 5 PTS</>}
           </button>
         </form>
@@ -579,7 +683,6 @@ export default function AttendancePage() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
