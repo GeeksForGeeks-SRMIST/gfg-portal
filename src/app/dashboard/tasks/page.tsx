@@ -38,7 +38,7 @@ export default function TasksPage() {
   // Dynamic Tab State
   const [activeTab, setActiveTab] = useState<"assigned" | "submissions" | "completed" | "ledger" | "create" | "bonus" | "penalty">("assigned");
 
-  // Filter Sub-tab for Leads: "my_tasks" vs "all_chapter_tasks"
+  // Filter Sub-tab for Leads
   const [taskViewFilter, setTaskViewFilter] = useState<"my_tasks" | "all_chapter_tasks">("my_tasks");
 
   // Domain Filter States for Member Dropdowns
@@ -131,14 +131,12 @@ export default function TasksPage() {
     return getRoleRank(reviewerRole) < getRoleRank(submitterRole);
   };
 
-  // Helper function to trigger push webhook api route
   async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/tasks") {
     try {
       await fetch("/api/webhooks/push", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           record: {
@@ -588,7 +586,7 @@ export default function TasksPage() {
   return (
     <div className="space-y-6">
       
-      {/* 1. Header (Heading and Short Description) */}
+      {/* 1. Header */}
       <div className="flex items-center gap-3 px-2">
         <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
           <CheckSquare className="w-6 h-6" />

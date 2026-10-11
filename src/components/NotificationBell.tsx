@@ -25,7 +25,6 @@ export function NotificationBell() {
       }
     }
 
-    // Custom local event listener for instant UI updates across components
     function handleLocalNoticeDispatched(event: any) {
       if (event.detail) {
         setNotifications((prev) => [event.detail, ...prev.filter((n) => n.id !== event.detail.id)]);
@@ -38,9 +37,9 @@ export function NotificationBell() {
     document.addEventListener("mousedown", handleClickOutside);
     window.addEventListener("gfg_notice_dispatched", handleLocalNoticeDispatched);
 
-    // Supabase Realtime Channel
+    const channelName = `realtime_notifications_bell_${Math.random().toString(36).substring(7)}`;
     const channel = supabase
-      .channel("realtime_notifications_bell_v4")
+      .channel(channelName)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications" },
@@ -77,6 +76,18 @@ export function NotificationBell() {
       } else {
         setPushEnabled(false);
       }
+
+      const win = window as any;
+      win.OneSignalDeferred = win.OneSignalDeferred || [];
+      win.OneSignalDeferred.push((OneSignal: any) => {
+        try {
+          if (OneSignal?.Notifications?.permission !== undefined) {
+            setPushEnabled(OneSignal.Notifications.permission);
+          }
+        } catch (e) {
+          console.log("OneSignal permission read error:", e);
+        }
+      });
     }
   }
 
@@ -94,16 +105,31 @@ export function NotificationBell() {
     setEnabling(true);
 
     try {
-      const OneSignal = (window as any).OneSignal;
-      if (OneSignal) {
-        await OneSignal.Notifications.requestPermission();
-        setPushEnabled(Notification.permission === "granted");
-      } else {
-        const permission = await Notification.requestPermission();
-        setPushEnabled(permission === "granted");
-      }
+      const win = window as any;
+      win.OneSignalDeferred = win.OneSignalDeferred || [];
+      
+      win.OneSignalDeferred.push(async (OneSignal: any) => {
+        try {
+          if (OneSignal?.Notifications?.requestPermission) {
+            await OneSignal.Notifications.requestPermission();
+          } else if (Notification.requestPermission) {
+            await Notification.requestPermission();
+          }
+
+          setPushEnabled(Notification.permission === "granted");
+
+          if (Notification.permission === "granted") {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && OneSignal?.login) {
+              OneSignal.login(user.id);
+            }
+          }
+        } catch (err) {
+          console.error("OneSignal permission request error:", err);
+        }
+      });
     } catch (err) {
-      console.error("OneSignal permission request error:", err);
+      console.error("Outer permission error:", err);
     } finally {
       setEnabling(false);
     }
@@ -215,9 +241,9 @@ export function NotificationBell() {
                 <p className="text-xs opacity-50 font-medium">No active notifications</p>
               </div>
             ) : (
-              notifications.map((n) => (
+              notifications.map((n, idx) => (
                 <div
-                  key={n.id || Math.random()}
+                  key={n.id || idx}
                   className={`p-3 neo-pressed rounded-2xl border-l-2 text-xs space-y-1 transition-all ${
                     n.type === "reminder" ? "border-amber-500 bg-amber-500/5" : "border-emerald-500 bg-emerald-500/5"
                   }`}

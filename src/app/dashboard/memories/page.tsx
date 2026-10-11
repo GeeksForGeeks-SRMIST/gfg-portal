@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 
 const QUICK_EMOJIS = ["❤️", "👍", "🔥", "🎉", "😂", "😮"];
-const ALL_EMOJIS = ["❤️", "👍", "🔥", "🎉", "😂", "😮", "👏", "🙌", "😍", "🚀", "💡", "💯", "✨", "🥳", "🙏"];
 
 export default function MemoriesPage() {
   const [profile, setProfile] = useState<any>(null);
@@ -80,7 +79,7 @@ export default function MemoriesPage() {
     const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
     setProfile(userProfile);
 
-    // 1. Fetch Memories with Member Author
+    // Fetch Memories with Member Author
     const { data: memData, error: memError } = await supabase
       .from("memories")
       .select("*, member:profiles!memories_member_id_fkey(full_name, role, domain, avatar_path)")
@@ -92,10 +91,9 @@ export default function MemoriesPage() {
       return;
     }
 
-    // 2. Fetch Reactions safely
+    // Fetch Reactions
     const { data: reactionsData } = await supabase.from("memory_reactions").select("*");
 
-    // Map reactions to memories
     const combinedMemories = (memData || []).map((mem) => {
       const memoryReactions = (reactionsData || []).filter((r) => r.memory_id === mem.id);
       return { ...mem, memory_reactions: memoryReactions };
@@ -105,14 +103,12 @@ export default function MemoriesPage() {
     setLoading(false);
   }
 
-  // Helper function to trigger push webhook api route
   async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/memories") {
     try {
       await fetch("/api/webhooks/push", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           record: {
@@ -128,7 +124,6 @@ export default function MemoriesPage() {
     }
   }
 
-  // Toggle Reaction with Real-time Sync
   async function handleToggleReaction(memoryId: string, emoji: string) {
     if (!profile?.id) return;
 
@@ -204,7 +199,6 @@ export default function MemoriesPage() {
       }
     }
 
-    // 1. Save memory
     const { error } = await supabase.from("memories").insert({
       member_id: profile.id,
       event_title: eventTitle,
@@ -219,7 +213,6 @@ export default function MemoriesPage() {
       const notifTitle = `📸 New Club Memory: ${eventTitle}`;
       const notifMsg = `${profile?.full_name || 'A team member'} posted a new story highlight! Check it out in the Memories feed.`;
 
-      // 2. Send Broadcast Notification to Entire Team (target_user_id = null)
       await supabase.from("notifications").insert({
         title: notifTitle,
         message: notifMsg,
@@ -227,7 +220,6 @@ export default function MemoriesPage() {
         type: "notice"
       });
 
-      // 3. Trigger push webhook broadcast across devices
       await triggerPushNotification(notifTitle, notifMsg, null);
 
       setEventTitle("");
@@ -281,12 +273,18 @@ export default function MemoriesPage() {
     return themes[Math.abs(hash) % themes.length];
   };
 
+  // Safe Sanitized Markdown Parsing (Prevents XSS Injection)
   const renderFormattedText = (text: string) => {
     if (!text) return "";
-    return text
+    const sanitized = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+    return sanitized
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/<u>(.*?)<\/u>/g, '<u>$1</u>')
+      .replace(/&lt;u&gt;(.*?)&lt;\/u&gt;/g, '<u>$1</u>')
       .replace(/`(.*?)`/g, '<code class="bg-black/20 dark:bg-white/10 px-1 py-0.5 rounded font-mono text-[11px]">$1</code>');
   };
 
@@ -363,7 +361,7 @@ export default function MemoriesPage() {
                       <div>
                         <p className="text-xs font-bold">{mem.member?.full_name || "Club Member"}</p>
                         <p className="text-[9px] opacity-50 uppercase tracking-widest font-extrabold">
-                          {mem.member?.role?.replace("_", " ")} • {mem.member?.domain || "General"}
+                          {mem.member?.role ? mem.member.role.replace(/_/g, " ") : "Member"} • {mem.member?.domain || "General"}
                         </p>
                       </div>
                     </div>

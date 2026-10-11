@@ -1,11 +1,16 @@
-// src/app/layout.tsx
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { Geist } from "next/font/google";
 import "@/app/globals.css";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
 import { Providers } from "@/components/Providers";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { OneSignalProvider } from "@/components/OneSignalProvider";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
 
 export const metadata: Metadata = {
   title: "GFG CORE TEAM",
@@ -36,7 +41,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={geistSans.variable}>
       <head>
         <link rel="icon" href="/gfg.png" sizes="any" />
         <link rel="apple-touch-icon" href="/gfg.png" />

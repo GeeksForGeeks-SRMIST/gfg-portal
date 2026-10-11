@@ -8,7 +8,6 @@ import {
   Bold, Italic, List, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock, Users, ShieldCheck, Video
 } from "lucide-react";
 
-// Consolidated Position Hierarchy
 const ROLE_OPTIONS = [
   { id: "all", label: "Full Team (Everyone)" },
   { id: "executive", label: "Executives (Presidents, Secs & Jt. Secs)" },
@@ -51,7 +50,6 @@ export default function NoticesPage() {
   useEffect(() => {
     fetchData();
 
-    // Subscribe to real-time notice insertions and deletions
     const channel = supabase
       .channel("notices_realtime_board_v8")
       .on("postgres_changes", { event: "*", schema: "public", table: "notices" }, () => {
@@ -80,7 +78,6 @@ export default function NoticesPage() {
       .select("*, author:profiles(full_name, role)")
       .order("created_at", { ascending: false });
     
-    // Client-side position filtering
     const filtered = (noticesData || []).filter((n) => {
       const targets: string[] = n.target_roles || ["all"];
       if (targets.includes("all")) return true;
@@ -592,7 +589,6 @@ export default function NoticesPage() {
                   <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">Mark High Priority</span>
                 </label>
 
-                {/* Refined Compact Button */}
                 <button 
                   type="submit" 
                   disabled={isPublishing} 

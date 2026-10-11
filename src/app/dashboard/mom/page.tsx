@@ -24,7 +24,7 @@ export default function MinutesOfMeetingPage() {
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Custom Modal States (Replacing browser alerts & confirms)
+  // Custom Modal States
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
     isOpen: false, message: ""
   });

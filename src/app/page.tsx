@@ -205,6 +205,7 @@ export default function LoginPage() {
                 <input
                   type="email"
                   required
+                  autoComplete="username email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
@@ -220,6 +221,7 @@ export default function LoginPage() {
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
@@ -244,6 +246,7 @@ export default function LoginPage() {
                 <input
                   type="email"
                   required
+                  autoComplete="username email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
@@ -269,11 +272,11 @@ export default function LoginPage() {
                   type="text"
                   required
                   maxLength={6}
-                  pattern="\d{6}"
-                  title="Enter 6 digits"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
                   value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40 font-mono tracking-widest"
                   placeholder="123456"
                 />
               </div>
@@ -287,6 +290,7 @@ export default function LoginPage() {
                   type="password"
                   required
                   minLength={6}
+                  autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="w-full pl-10 pr-3 py-2.5 rounded-xl neo-pressed focus:outline-none focus:ring-1 focus:ring-emerald-500/50 bg-transparent text-xs transition-all font-medium placeholder:opacity-40"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { 
   Search, 
@@ -82,13 +82,28 @@ export default function AdminHubPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const supabase = createClient();
+  const isInitialLoad = useRef(true);
 
   useEffect(() => {
-    fetchData();
+    fetchData(true);
+
+    // Real-time synchronization for profile roster updates without flickering
+    const channel = supabase
+      .channel("realtime_admin_profiles")
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => {
+        fetchData(false);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  async function fetchData() {
-    setLoading(true);
+  async function fetchData(showLoading = false) {
+    if (showLoading || isInitialLoad.current) {
+      setLoading(true);
+    }
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -117,7 +132,33 @@ export default function AdminHubPage() {
     } catch (err) {
       console.error("Error loading roster:", err);
     } finally {
-      setLoading(false);
+      if (showLoading || isInitialLoad.current) {
+        setLoading(false);
+        isInitialLoad.current = false;
+      }
+    }
+  }
+
+  // Trigger OneSignal Device Push Notification Webhook
+  async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard") {
+    try {
+      await fetch("/api/webhooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+        },
+        body: JSON.stringify({
+          record: {
+            title,
+            message,
+            link,
+            target_user_id: targetUserId
+          }
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to trigger push webhook:", err);
     }
   }
 
@@ -138,8 +179,22 @@ export default function AdminHubPage() {
     if (error) {
       setAlertModal({ isOpen: true, message: "Failed to update status: " + error.message });
     } else {
-      setAlertModal({ isOpen: true, message: `Member status updated to ${newStatus} successfully!` });
-      fetchData();
+      const title = `Membership Status Updated: ${newStatus.toUpperCase()}`;
+      const message = `Your membership status on GFG Portal has been marked as ${newStatus}.`;
+
+      // 1. Insert in-app notification
+      await supabase.from("notifications").insert({
+        title,
+        message,
+        target_user_id: memberId,
+        type: "notice"
+      });
+
+      // 2. Dispatch OneSignal push notification
+      await triggerPushNotification(title, message, memberId);
+
+      setAlertModal({ isOpen: true, message: `Member status updated to ${newStatus} successfully and notified!` });
+      fetchData(false);
     }
   }
 
@@ -197,9 +252,21 @@ export default function AdminHubPage() {
     if (profileError) {
       setAlertModal({ isOpen: true, message: "Failed to update member: " + profileError.message });
     } else {
+      const title = "Profile Details Updated by Admin";
+      const message = "Your portal profile details were updated by the Executive Board.";
+
+      // Send real-time notification to edited member
+      await supabase.from("notifications").insert({
+        title,
+        message,
+        target_user_id: editingMember.id,
+        type: "notice"
+      });
+      await triggerPushNotification(title, message, editingMember.id);
+
       setAlertModal({ isOpen: true, message: "Member details updated successfully!" });
       setEditingMember(null);
-      fetchData();
+      fetchData(false);
     }
     setSaving(false);
   }
@@ -219,7 +286,7 @@ export default function AdminHubPage() {
     if (error) {
       setAlertModal({ isOpen: true, message: "Error deleting: " + error.message });
     } else {
-      fetchData();
+      fetchData(false);
     }
   }
 
@@ -240,7 +307,6 @@ export default function AdminHubPage() {
     }
   };
 
-  // Truncates email username prior to '@': if > 6 characters, appends '...' (e.g. abcdefgh@srmist.edu.in -> abcdef...)
   const formatEmailUsername = (emailStr: string) => {
     if (!emailStr) return "N/A";
     const username = emailStr.split("@")[0];
@@ -285,7 +351,7 @@ export default function AdminHubPage() {
   return (
     <div className="space-y-6">
       
-      {/* Header & Search Bar with Page Logo Icon */}
+      {/* Header & Search Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-2">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
@@ -382,7 +448,6 @@ export default function AdminHubPage() {
                         <p className="text-[10px] opacity-50 uppercase">{m.domain || "N/A"}</p>
                       </td>
 
-                      {/* Phone Column */}
                       <td className="p-4 font-mono">
                         {m.phone ? (
                           <a 
@@ -398,7 +463,6 @@ export default function AdminHubPage() {
                         )}
                       </td>
 
-                      {/* Separate WhatsApp Column */}
                       <td className="p-4">
                         {waUrl ? (
                           <a 
@@ -415,7 +479,6 @@ export default function AdminHubPage() {
                         )}
                       </td>
 
-                      {/* Truncated Mail ID Column */}
                       <td className="p-4 font-mono font-bold opacity-80" title={m.srm_email}>
                         {formatEmailUsername(m.srm_email)}
                       </td>
@@ -477,7 +540,6 @@ export default function AdminHubPage() {
                             </button>
                           )}
 
-                          {/* Strictly President Only Delete Feature */}
                           {isPresident && (
                             <button
                               onClick={() => promptDeleteMember(m.id, m.full_name)}
@@ -519,7 +581,9 @@ export default function AdminHubPage() {
               </div>
               <div>
                 <h4 className="font-extrabold text-base">{viewingMember.full_name || "N/A"}</h4>
-                <p className="text-xs text-emerald-500 font-bold capitalize">{viewingMember.role?.replace("_", " ") || "Member"} • {viewingMember.domain || "N/A"} Domain</p>
+                <p className="text-xs text-emerald-500 font-bold capitalize">
+                  {viewingMember.role?.replace("_", " ") || "Member"} • {viewingMember.domain || "N/A"} Domain
+                </p>
                 <p className="text-[10px] opacity-60 italic mt-0.5">"{viewingMember.tagline || 'No tagline provided'}"</p>
               </div>
             </div>
@@ -543,7 +607,7 @@ export default function AdminHubPage() {
                   <span className="text-[9px] font-bold uppercase tracking-widest opacity-45">Department</span>
                   <p className="font-semibold">{viewingMember.department || "N/A"}</p>
                 </div>
-                <div className="neo-pressed rounded-xl p-3 space-y-1">
+                <div className="neo-pressed rounded-xl p-3 space-y-1 sm:col-span-2">
                   <span className="text-[9px] font-bold uppercase tracking-widest opacity-45">Phone / WhatsApp</span>
                   {viewingMember.phone ? (
                     <div className="flex items-center gap-3 pt-0.5">

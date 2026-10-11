@@ -17,7 +17,6 @@ export function PwaInstallPrompt() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // 1. Comprehensive Installed / Standalone Mode Check
     const standaloneMode =
       window.matchMedia("(display-mode: standalone)").matches ||
       (navigator as any).standalone === true ||
@@ -32,17 +31,14 @@ export function PwaInstallPrompt() {
       setShowInstallCard(false);
     }
 
-    // 2. Detect iOS Device
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
     setIsIos(isIOSDevice);
 
-    // 3. Show Install Card ONLY if not installed and not dismissed
     const installDismissed = localStorage.getItem("gfg_pwa_install_dismissed");
     if (!standaloneMode && !isAlreadyInstalled && !installDismissed) {
       setShowInstallCard(true);
     }
 
-    // 4. Capture native browser install prompt
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -51,7 +47,6 @@ export function PwaInstallPrompt() {
       }
     };
 
-    // 5. Listen for actual successful app installation event
     const handleAppInstalled = () => {
       localStorage.setItem("gfg_pwa_is_installed", "true");
       setShowInstallCard(false);
@@ -61,7 +56,6 @@ export function PwaInstallPrompt() {
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
     window.addEventListener("appinstalled", handleAppInstalled);
 
-    // 6. Check Push Notification Permission Status
     if ("Notification" in window) {
       const currentPerm = Notification.permission;
       setPushStatus(currentPerm);

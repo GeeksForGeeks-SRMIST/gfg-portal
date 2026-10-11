@@ -102,7 +102,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 GeeksforGeeks
               </h2>
               <p className="text-[10px] text-[var(--text-muted)] tracking-wider truncate">
-                <strong className="font-black text-[var(--text-main)]">GFG SRMIST</strong> • CORE TEAM
+                <strong className="font-black text-[var(--text-main)]">GFG SRMIST</strong> CORE TEAM
               </p>
             </div>
           </div>
@@ -186,7 +186,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <div>
                     <h2 className="font-black tracking-tight text-xs text-gradient">GeeksforGeeks</h2>
                     <p className="text-[9px] text-[var(--text-muted)] tracking-wider">
-                      <strong className="font-black text-[var(--text-main)]">GFG SRMIST</strong> • CORE
+                      <strong className="font-black text-[var(--text-main)]">GFG SRMIST</strong> CORE
                     </p>
                   </div>
                 </div>

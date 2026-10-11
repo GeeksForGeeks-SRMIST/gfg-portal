@@ -2,6 +2,7 @@
 
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 import type { ThemeProviderProps } from "next-themes";
+import { GlobalModalProvider } from "@/context/GlobalModalContext";
 
 export function Providers({ children, ...props }: ThemeProviderProps) {
   return (
@@ -12,7 +13,9 @@ export function Providers({ children, ...props }: ThemeProviderProps) {
       disableTransitionOnChange
       {...props}
     >
-      {children}
+      <GlobalModalProvider>
+        {children}
+      </GlobalModalProvider>
     </NextThemesProvider>
   );
 }

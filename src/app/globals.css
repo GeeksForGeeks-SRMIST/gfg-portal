@@ -4,7 +4,7 @@
   --color-gfg-green: #2f8d46;
   --color-gfg-dark: #1e5e2f;
   --color-gfg-glow: rgba(47, 141, 70, 0.35);
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 :root {

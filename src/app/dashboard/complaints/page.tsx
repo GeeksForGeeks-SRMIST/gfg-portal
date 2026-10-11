@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { 
   AlertTriangle, 
@@ -20,7 +20,7 @@ export default function ComplaintsPage() {
   const [complaints, setComplaints] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const isExecutiveAdmin = ['president', 'secretary', 'joint_secretary'].includes(profile?.role);
+  const isExecutiveAdmin = ['president', 'secretary', 'joint_secretary'].includes(profile?.role?.toLowerCase());
 
   // Tab State: "personal" | "team" | "submit"
   const [activeTab, setActiveTab] = useState<"personal" | "team" | "submit">("personal");
@@ -56,14 +56,15 @@ export default function ComplaintsPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const supabase = createClient();
+  const isInitialLoad = useRef(true);
 
   useEffect(() => {
-    fetchData();
+    fetchData(true);
 
-    // Real-time synchronization for complaint updates
+    // Real-time synchronization for complaint updates without flickering
     const channel = supabase
       .channel("complaints_realtime_channel")
-      .on("postgres_changes", { event: "*", schema: "public", table: "complaints" }, () => fetchData())
+      .on("postgres_changes", { event: "*", schema: "public", table: "complaints" }, () => fetchData(false))
       .subscribe();
 
     return () => {
@@ -71,21 +72,29 @@ export default function ComplaintsPage() {
     };
   }, []);
 
-  async function fetchData() {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+  async function fetchData(showLoading = false) {
+    if (showLoading || isInitialLoad.current) {
+      setLoading(true);
+    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-    setProfile(userProfile);
+      const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+      setProfile(userProfile);
 
-    const { data: compData } = await supabase
-      .from("complaints")
-      .select("*, member:profiles!complaints_member_id_fkey(full_name, role, domain, srm_email)")
-      .order("created_at", { ascending: false });
+      const { data: compData } = await supabase
+        .from("complaints")
+        .select("*, member:profiles!complaints_member_id_fkey(full_name, role, domain, srm_email)")
+        .order("created_at", { ascending: false });
 
-    setComplaints(compData || []);
-    setLoading(false);
+      setComplaints(compData || []);
+    } finally {
+      if (showLoading || isInitialLoad.current) {
+        setLoading(false);
+        isInitialLoad.current = false;
+      }
+    }
   }
 
   // Helper function to trigger push webhook api route
@@ -128,11 +137,32 @@ export default function ComplaintsPage() {
     if (error) {
       setAlertModal({ isOpen: true, message: "Failed to submit grievance: " + error.message });
     } else {
-      setAlertModal({ isOpen: true, message: "Complaint logged successfully. Executive board has been notified." });
+      const notifTitle = `🚨 New Grievance Logged: ${subject}`;
+      const notifMsg = `${profile.full_name || "A member"} submitted a ${severity.toLowerCase()} severity grievance in category "${category}".`;
+
+      // Notify executive admins real-time
+      const { data: execUsers } = await supabase
+        .from("profiles")
+        .select("id")
+        .in("role", ["president", "secretary", "joint_secretary"]);
+
+      if (execUsers && execUsers.length > 0) {
+        for (const admin of execUsers) {
+          await supabase.from("notifications").insert({
+            title: notifTitle,
+            message: notifMsg,
+            target_user_id: admin.id,
+            type: "notice"
+          });
+          await triggerPushNotification(notifTitle, notifMsg, admin.id);
+        }
+      }
+
+      setAlertModal({ isOpen: true, message: "Complaint logged successfully. Executive board has been notified in real time." });
       setSubject("");
       setDescription("");
       setActiveTab("personal");
-      fetchData();
+      fetchData(false);
     }
     setSubmitting(false);
   }
@@ -172,7 +202,7 @@ export default function ComplaintsPage() {
 
       setAlertModal({ isOpen: true, message: "Status updated & member notified successfully." });
       setResolutionModal({ isOpen: false, complaint: null, status: "In Progress", notes: "" });
-      fetchData();
+      fetchData(false);
     }
     setUpdatingResolution(false);
   }
@@ -188,7 +218,7 @@ export default function ComplaintsPage() {
     if (error) {
       setAlertModal({ isOpen: true, message: "Error deleting: " + error.message });
     } else {
-      fetchData();
+      fetchData(false);
     }
   }
 
@@ -197,7 +227,7 @@ export default function ComplaintsPage() {
   }
 
   const personalComplaints = complaints.filter(c => c.member_id === profile?.id);
-  const teamComplaints = complaints; // All complaints for admin view
+  const teamComplaints = complaints;
 
   const getStatusTheme = (st: string) => {
     switch (st) {

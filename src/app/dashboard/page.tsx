@@ -95,7 +95,6 @@ export default function DashboardOverview() {
       setCurrentTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setCurrentDate(now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }));
 
-      // Dynamic Time-Aware Color Harmonization Engine
       if (hours >= 5 && hours < 7) {
         setTimePhase({
           greeting: "Good Dawn",
@@ -322,7 +321,6 @@ export default function DashboardOverview() {
         style={timePhase.gradientStyle}
         className="neo-flat rounded-[2rem] p-5 md:p-6 relative overflow-hidden border border-white/10 shadow-lg transition-all duration-700"
       >
-        {/* Top Time Phase Badge */}
         <div className="flex items-center justify-between relative z-10 mb-2">
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/40 dark:bg-black/30 backdrop-blur-md border border-white/20 text-[10px] font-black uppercase tracking-widest text-[var(--text-main)] shadow-xs">
             {timePhase.icon}
@@ -330,27 +328,22 @@ export default function DashboardOverview() {
           </div>
         </div>
 
-        {/* Greeting Body */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
           <div className="space-y-1 max-w-2xl">
             <p className="text-[10px] font-black uppercase tracking-widest opacity-70">
               {timePhase.greeting},
             </p>
             
-            {/* Bold Name Typography */}
             <h1 className={`text-2xl sm:text-3xl md:text-4xl font-[900] tracking-tight bg-gradient-to-r ${timePhase.nameColorClass} bg-clip-text text-transparent drop-shadow-xs`}>
               {profile.full_name}
             </h1>
 
-            {/* Badges: Role & Domain */}
             <div className="flex flex-wrap items-center gap-2 pt-2.5">
-              {/* Badge 1: Role */}
               <div className={`px-3 py-1 rounded-xl backdrop-blur-md text-[10px] font-black uppercase tracking-wider border flex items-center gap-1.5 shadow-xs ${timePhase.badgeContainerStyle}`}>
                 <Crown className="w-3 h-3 shrink-0" />
                 <span>{formatRoleTitle(profile.role)}</span>
               </div>
 
-              {/* Badge 2: Domain */}
               <div className="px-3 py-1 rounded-xl bg-white/40 dark:bg-black/30 backdrop-blur-md text-[10px] font-black uppercase tracking-wider opacity-90 flex items-center gap-1.5 border border-white/20">
                 <Layers className="w-3 h-3 text-teal-400 shrink-0" />
                 <span>{domainDisplay} Domain</span>
@@ -381,11 +374,11 @@ export default function DashboardOverview() {
           <div className="flex items-center justify-between text-emerald-500">
             <Clock className="w-4 h-4" />
             <span className="text-[9px] font-mono font-black uppercase tracking-wider text-emerald-500">
-              {currentDate || "04 OCT 2026"}
+              {currentDate || "11 OCT 2026"}
             </span>
           </div>
           <div>
-            <p className="text-lg md:text-2xl font-mono font-extrabold text-emerald-500 leading-none">{currentTime || "03:00:00"}</p>
+            <p className="text-lg md:text-2xl font-mono font-extrabold text-emerald-500 leading-none">{currentTime || "02:12:00"}</p>
             <p className="text-[9px] font-bold opacity-50 uppercase tracking-wider mt-1">Station Time</p>
           </div>
         </div>

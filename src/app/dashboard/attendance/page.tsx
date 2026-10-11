@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CalendarCheck, CheckCircle2, XCircle, Users, ClipboardList, Loader2, Trash2, AlertTriangle } from "lucide-react";
 
@@ -28,78 +28,132 @@ export default function AttendancePage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const supabase = createClient();
+  const userProfileRef = useRef<any>(null);
+  const isInitialLoad = useRef(true);
 
   useEffect(() => {
     async function load() {
-      setLoading(true);
+      if (isInitialLoad.current) setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
       const { data: userProfile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
       setProfile(userProfile);
+      userProfileRef.current = userProfile;
 
       if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
         setSessionDomain(userProfile.domain);
       }
 
-      await fetchData(userProfile);
+      await fetchData(userProfile, isInitialLoad.current);
       setLoading(false);
+      isInitialLoad.current = false;
     }
     load();
+
+    // REALTIME SUBSCRIPTION FOR AUTOMATIC NO-REFRESH UPDATES WITHOUT FLICKERING
+    const channelName = `realtime_attendance_page_${Math.random().toString(36).substring(7)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "attendance_sessions" },
+        () => {
+          if (userProfileRef.current) {
+            fetchData(userProfileRef.current, false);
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "attendance_records" },
+        () => {
+          if (userProfileRef.current) {
+            fetchData(userProfileRef.current, false);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  async function fetchData(userProfile: any) {
-    let memberQuery = supabase.from("profiles").select("*").eq("status", "approved");
-    
-    if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
-      // Fetch domain members AND the core executive board (President, Sec, Jt Sec)
-      memberQuery = memberQuery.or(`domain.eq.${userProfile.domain},role.eq.president,role.eq.secretary,role.eq.joint_secretary`);
+  async function fetchData(userProfile: any, showLoading = false) {
+    if (showLoading) setLoading(true);
+    try {
+      let memberQuery = supabase.from("profiles").select("*").eq("status", "approved");
+      
+      if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
+        memberQuery = memberQuery.or(`domain.eq.${userProfile.domain},role.eq.president,role.eq.secretary,role.eq.joint_secretary`);
+      }
+      
+      const { data: memberData } = await memberQuery;
+      setMembers(memberData || []);
+
+      const initialMap: Record<string, boolean> = {};
+      memberData?.forEach((m) => {
+        initialMap[m.id] = true;
+      });
+      setAttendanceMap(initialMap);
+
+      let sessionQuery = supabase
+        .from("attendance_sessions")
+        .select("*, creator:profiles!attendance_sessions_created_by_fkey(full_name, role), attendance_records(*, profiles(full_name, srm_email, reg_number, domain))")
+        .order("date", { ascending: false });
+
+      if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
+        sessionQuery = sessionQuery.or(`domain.eq.${userProfile.domain},domain.eq.all`);
+      }
+
+      const { data: sessionData } = await sessionQuery;
+      setSessions(sessionData || []);
+    } finally {
+      if (showLoading) setLoading(false);
     }
-    
-    const { data: memberData } = await memberQuery;
-    setMembers(memberData || []);
-
-    const initialMap: Record<string, boolean> = {};
-    memberData?.forEach((m) => {
-      initialMap[m.id] = true;
-    });
-    setAttendanceMap(initialMap);
-
-    let sessionQuery = supabase
-      .from("attendance_sessions")
-      .select("*, creator:profiles!attendance_sessions_created_by_fkey(full_name, role), attendance_records(*, profiles(full_name, srm_email, reg_number, domain))")
-      .order("date", { ascending: false });
-
-    if (userProfile?.role === "domain_director" || userProfile?.role === "associate_lead") {
-      sessionQuery = sessionQuery.or(`domain.eq.${userProfile.domain},domain.eq.all`);
-    }
-
-    const { data: sessionData } = await sessionQuery;
-    setSessions(sessionData || []);
   }
 
-  // Expanded permission check: Executives, Directors, Associate Leads, and Global Admins can take attendance
+  // Helper for OneSignal Device Push Notifications
+  async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/attendance") {
+    try {
+      await fetch("/api/webhooks/push", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+        },
+        body: JSON.stringify({
+          record: {
+            title,
+            message,
+            link,
+            target_user_id: targetUserId
+          }
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to trigger push webhook:", err);
+    }
+  }
+
+  // Expanded permission check
   const isGlobalAdmin = ["president", "secretary", "joint_secretary", "executive"].includes(profile?.role?.toLowerCase());
   const isDomainLead = ["domain_director", "associate_lead"].includes(profile?.role?.toLowerCase());
   const canTakeAttendance = isGlobalAdmin || isDomainLead;
 
-  // DYNAMIC TARGETING: Filter members dynamically based on the selected meeting domain/position
+  // DYNAMIC TARGETING
   const coreRoles = ["president", "secretary", "joint_secretary"];
   const filteredMembers = members.filter((m) => {
-    // 1. ALWAYS include the Core Board in every single meeting across all domains
     if (coreRoles.includes(m.role)) return true; 
     
     const actualDomain = isDomainLead ? profile.domain : sessionDomain;
     
-    // 2. If 'all' is selected, include everyone
     if (actualDomain === "all") return true; 
-    
-    // 3. Handle Position-Based Filters
     if (actualDomain === "directors") return m.role === "domain_director"; 
     if (actualDomain === "associates") return m.role === "associate_lead"; 
     if (actualDomain === "directors_associates") return m.role === "domain_director" || m.role === "associate_lead";
     
-    // 4. Handle Domain-Based Filters (Technical, Events, Creatives, Executive)
     return m.domain === actualDomain;
   });
 
@@ -138,7 +192,7 @@ export default function AttendancePage() {
       return;
     }
 
-    // ONLY insert records for the targeted filtered members
+    // Insert records for targeted members only
     const recordsToInsert = filteredMembers.map((m) => ({
       session_id: sessionRes.id,
       user_id: m.id,
@@ -153,34 +207,35 @@ export default function AttendancePage() {
       return;
     }
 
-    // AUTOMATIC 5 MARKS AWARDING & NOTIFICATIONS FOR PRESENT MEMBERS
+    // AUTOMATIC 5 MARKS AWARDING & REAL-TIME ONESIGNAL NOTIFICATIONS
     const presentMembers = filteredMembers.filter(m => (attendanceMap[m.id] ?? true));
+    const ledgerReason = `Attendance: ${sessionTitle} (${sessionDate})`;
 
     for (const member of presentMembers) {
-      // 1. Insert into points_ledger
-      const { error: ledgerErr } = await supabase.from("points_ledger").insert({
+      await supabase.from("points_ledger").insert({
         profile_id: member.id,
         points_awarded: 5,
-        reason: `Attendance: ${sessionTitle} (${sessionDate})`
+        reason: ledgerReason
       });
 
-      if (ledgerErr) {
-        console.error(`Failed to award points to ${member.full_name}:`, ledgerErr.message);
-      }
+      const notifTitle = `✅ Attendance Marked: +5 PTS!`;
+      const notifMsg = `You were marked present for "${sessionTitle}". 5 points added to your ledger.`;
 
-      // 2. Insert notification
       await supabase.from("notifications").insert({
-        title: `✅ Attendance Marked: +5 PTS!`,
-        message: `You were marked present for "${sessionTitle}". 5 points added to your ledger.`,
+        title: notifTitle,
+        message: notifMsg,
         target_user_id: member.id,
         type: "task"
       });
+
+      // Dispatch OneSignal push notification
+      await triggerPushNotification(notifTitle, notifMsg, member.id);
     }
 
-    setAlertModal({ isOpen: true, message: `Attendance successfully recorded! +5 points awarded to ${presentMembers.length} targeted members.` });
+    setAlertModal({ isOpen: true, message: `Attendance successfully recorded! +5 points awarded and real-time push notifications sent to ${presentMembers.length} targeted members.` });
     setSessionTitle("");
     setActiveTab("logs");
-    await fetchData(profile);
+    await fetchData(profile, false);
     setSubmitting(false);
   }
 
@@ -188,30 +243,25 @@ export default function AttendancePage() {
     if (!deleteModal.sessionId) return;
     setIsDeleting(true);
 
-    const { error: recErr } = await supabase
-      .from("attendance_records")
-      .delete()
-      .eq("session_id", deleteModal.sessionId);
-
-    if (recErr) {
-      setAlertModal({ isOpen: true, message: "Failed to delete attendance records: " + recErr.message });
-      setIsDeleting(false);
-      return;
-    }
-
-    const { error: sessionErr } = await supabase
-      .from("attendance_sessions")
-      .delete()
-      .eq("id", deleteModal.sessionId);
+    const { data: rpcRes, error: rpcErr } = await supabase.rpc(
+      "delete_attendance_session_cascade",
+      { p_session_id: deleteModal.sessionId }
+    );
 
     setIsDeleting(false);
     setDeleteModal({ isOpen: false, sessionId: null, title: "" });
 
-    if (sessionErr) {
-      setAlertModal({ isOpen: true, message: "Failed to delete session: " + sessionErr.message });
+    if (rpcErr || (rpcRes && !rpcRes.success)) {
+      setAlertModal({
+        isOpen: true,
+        message: "Failed to delete session: " + (rpcErr?.message || rpcRes?.error || "Unknown error"),
+      });
     } else {
-      setAlertModal({ isOpen: true, message: "Attendance session deleted successfully." });
-      await fetchData(profile);
+      setAlertModal({
+        isOpen: true,
+        message: `Attendance session and awarded points deleted successfully! (${rpcRes?.points_reversed || 0} points records reversed)`,
+      });
+      await fetchData(profile, false);
     }
   }
 

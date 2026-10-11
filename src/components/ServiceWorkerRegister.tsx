@@ -24,7 +24,6 @@ export function ServiceWorkerRegister() {
       .then((reg) => {
         registration = reg;
 
-        // Automatically poll for updates every 5 minutes in background
         setInterval(() => {
           reg.update().catch(() => {});
         }, 1000 * 60 * 5);

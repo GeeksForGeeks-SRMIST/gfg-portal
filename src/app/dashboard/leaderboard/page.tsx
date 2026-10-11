@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { 
   Trophy, 
@@ -27,24 +27,36 @@ export default function LeaderboardPage() {
   const [loadingLedger, setLoadingLedger] = useState(false);
 
   const supabase = createClient();
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    fetchLeaderboard();
+    // Initial fetch with spinner
+    fetchLeaderboard(true);
+
+    // Debounced silent handler for realtime updates
+    const handleRealtimeChange = () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(() => {
+        fetchLeaderboard(false); // Silent background fetch without toggling loading spinner
+      }, 300);
+    };
 
     // Real-time synchronization
+    const channelName = `leaderboard_realtime_${Math.random().toString(36).substring(7)}`;
     const channel = supabase
-      .channel("leaderboard_realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "points_ledger" }, () => fetchLeaderboard())
-      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchLeaderboard())
+      .channel(channelName)
+      .on("postgres_changes", { event: "*", schema: "public", table: "points_ledger" }, handleRealtimeChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, handleRealtimeChange)
       .subscribe();
 
     return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       supabase.removeChannel(channel);
     };
   }, []);
 
-  async function fetchLeaderboard() {
-    setLoading(true);
+  async function fetchLeaderboard(isInitial = false) {
+    if (isInitial) setLoading(true);
 
     // 1. Fetch approved profiles
     const { data: profiles } = await supabase
@@ -60,13 +72,17 @@ export default function LeaderboardPage() {
       pointsMap[item.profile_id] = (pointsMap[item.profile_id] || 0) + item.points_awarded;
     });
 
-    const ranked = (profiles || []).map((p) => ({
-      ...p,
-      points: (p.total_points ?? pointsMap[p.id]) || 0
-    })).sort((a, b) => b.points - a.points);
+    // Filter out President from the leaderboard entirely
+    const ranked = (profiles || [])
+      .filter((p) => p.role?.toLowerCase() !== "president")
+      .map((p) => ({
+        ...p,
+        points: (p.total_points ?? pointsMap[p.id]) || 0
+      }))
+      .sort((a, b) => b.points - a.points);
 
     setLeaderboard(ranked);
-    setLoading(false);
+    if (isInitial) setLoading(false);
   }
 
   // Fetch individual point history for any member
@@ -326,7 +342,9 @@ export default function LeaderboardPage() {
                 </div>
                 <div>
                   <h3 className="text-sm font-black">{selectedMember.full_name}</h3>
-                  <p className="text-[10px] uppercase font-bold text-emerald-500">{selectedMember.domain} • {selectedMember.role?.replace("_", " ")}</p>
+                  <p className="text-[10px] uppercase font-bold text-emerald-500">
+                    {selectedMember.domain} • {selectedMember.role?.replace("_", " ")}
+                  </p>
                 </div>
               </div>
 

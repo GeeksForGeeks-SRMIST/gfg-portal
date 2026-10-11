@@ -2,7 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { MessageSquareHeart, Plus, CheckCircle2, XCircle, ShieldCheck, Loader2, Trash2, EyeOff, Sparkles, Flame, Laugh, Heart, Globe, AlertTriangle } from "lucide-react";
+import { 
+  MessageSquareHeart, 
+  Plus, 
+  CheckCircle2, 
+  XCircle, 
+  ShieldCheck, 
+  Loader2, 
+  Trash2, 
+  EyeOff, 
+  Sparkles, 
+  Flame, 
+  Laugh, 
+  Heart, 
+  Globe, 
+  AlertTriangle 
+} from "lucide-react";
 
 export default function ConfessionsPage() {
   const [profile, setProfile] = useState<any>(null);
@@ -15,12 +30,15 @@ export default function ConfessionsPage() {
   const [category, setCategory] = useState("General");
   const [submitting, setSubmitting] = useState(false);
 
-  // Custom Modal States (Replacing browser alerts & confirms)
+  // Custom Modal States
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string }>({
-    isOpen: false, message: ""
+    isOpen: false,
+    message: ""
   });
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; confessionId: string | null; messageSnippet: string }>({
-    isOpen: false, confessionId: null, messageSnippet: ""
+    isOpen: false,
+    confessionId: null,
+    messageSnippet: ""
   });
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -47,16 +65,14 @@ export default function ConfessionsPage() {
     setLoading(false);
   }
 
-  const isExecutiveAdmin = ['president', 'secretary', 'joint_secretary'].includes(profile?.role);
+  const isExecutiveAdmin = ["president", "secretary", "joint_secretary"].includes(profile?.role);
 
-  // Helper function to trigger push webhook api route
   async function triggerPushNotification(title: string, message: string, targetUserId: string | null = null, link: string = "/dashboard/confessions") {
     try {
       await fetch("/api/webhooks/push", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_WEBHOOK_SECRET || "31113426c2b78bb4e69ee212aed1141c7119852c36463ea372b00c2f086fde6b"}`,
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           record: {
@@ -108,7 +124,6 @@ export default function ConfessionsPage() {
         const notifTitle = `💬 New Anonymous Confession (${approvedConf?.category || "General"})`;
         const notifMsg = `"${approvedConf?.message ? (approvedConf.message.substring(0, 75) + "...") : "Check out the new confession on the feed!"}"`;
 
-        // Insert notification into DB for broadcast feed / notices
         await supabase.from("notifications").insert({
           title: notifTitle,
           message: notifMsg,
@@ -116,7 +131,6 @@ export default function ConfessionsPage() {
           type: "notice"
         });
 
-        // Trigger push notifications across all subscribed devices
         await triggerPushNotification(notifTitle, notifMsg, null);
       }
 
@@ -139,7 +153,6 @@ export default function ConfessionsPage() {
     }
   }
 
-  // Category Styling Helper
   const getCategoryTheme = (cat: string) => {
     switch (cat?.toLowerCase()) {
       case "campus life":
