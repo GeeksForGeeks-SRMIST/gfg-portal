@@ -26,8 +26,19 @@ import {
   Code,
   Link as LinkIcon,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Edit3,
+  Check
 } from "lucide-react";
+
+// Helper function to format DB timestamp to YYYY-MM-DDTHH:mm for datetime-local input
+const formatForDateTimeLocal = (dateString: string) => {
+  if (!dateString) return "";
+  const d = new Date(dateString);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
 
 // Live Countdown Timer Component
 function CountdownTimer({ deadline }: { deadline: string }) {
@@ -64,7 +75,7 @@ function CountdownTimer({ deadline }: { deadline: string }) {
   if (timeLeft.isOverdue) {
     return (
       <div className="flex items-center gap-1 text-[10px] font-black text-rose-500 bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20 shrink-0">
-        <AlertTriangle className="w-3 h-3" /> Overdue
+        <AlertTriangle className="w-3 h-3 animate-pulse" /> Overdue
       </div>
     );
   }
@@ -102,6 +113,18 @@ export default function TasksPage() {
   const [reassignDomainFilter, setReassignDomainFilter] = useState("all");
   const [newAssigneeIds, setNewAssigneeIds] = useState<string[]>([]);
   const [isReassigning, setIsReassigning] = useState(false);
+
+  // Edit Task Modal State
+  const [editingTask, setEditingTask] = useState<any>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editPoints, setEditPoints] = useState(10);
+  const [editDeadline, setEditDeadline] = useState("");
+  const [isUpdatingTask, setIsUpdatingTask] = useState(false);
+
+  // Manual Completion Override State
+  const [manualCompleteState, setManualCompleteState] = useState<{ taskId: string; assignmentId: string; userId: string; userName: string } | null>(null);
+  const [isCompletingManually, setIsCompletingManually] = useState(false);
 
   // Claim Floating Task State
   const [claimingTaskId, setClaimingTaskId] = useState<string | null>(null);
@@ -149,6 +172,7 @@ export default function TasksPage() {
   });
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editAreaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
 
   const fetchPageData = useCallback(async () => {
@@ -161,7 +185,6 @@ export default function TasksPage() {
 
     const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(pData?.role);
 
-    // Fetch grouped tasks with assigner profile, assignments, and member details
     let taskQuery = supabase
       .from("tasks")
       .select(`
@@ -185,7 +208,6 @@ export default function TasksPage() {
       );
     }
 
-    // Process Overdue Penalties automatically
     const now = new Date();
     for (const task of fetchedTasks) {
       if (new Date(task.deadline) < now) {
@@ -220,7 +242,6 @@ export default function TasksPage() {
 
     setTasks(fetchedTasks);
 
-    // Fetch Submissions Queue
     const { data: subData } = await supabase
       .from("task_submissions")
       .select("*, task:tasks(*), member:profiles!task_submissions_member_id_fkey(id, full_name, domain, role)")
@@ -228,7 +249,6 @@ export default function TasksPage() {
     
     setSubmissions(subData || []);
 
-    // Fetch Ledger
     const { data: lData } = await supabase
       .from("points_ledger")
       .select("*")
@@ -236,7 +256,6 @@ export default function TasksPage() {
       .order("created_at", { ascending: false });
     setLedger(lData || []);
 
-    // Fetch Members
     const { data: mData } = await supabase.from("profiles").select("id, full_name, domain, role").eq("status", "approved");
     setMembers(mData || []);
 
@@ -292,18 +311,21 @@ export default function TasksPage() {
     }
   }
 
-  // Domain filter helper
   const filterMembersByDomain = (domain: string) => {
     if (domain === "all") return members;
     return members.filter(m => m.domain?.toLowerCase() === domain.toLowerCase());
   };
 
-  const applyFormatting = (formatType: "bold" | "italic" | "list" | "code" | "link") => {
-    if (!textareaRef.current) return;
-    const input = textareaRef.current;
+  const applyFormatting = (formatType: "bold" | "italic" | "list" | "code" | "link", isEdit = false) => {
+    const ref = isEdit ? editAreaRef : textareaRef;
+    const value = isEdit ? editDesc : taskDesc;
+    const setValue = isEdit ? setEditDesc : setTaskDesc;
+
+    if (!ref.current) return;
+    const input = ref.current;
     const start = input.selectionStart;
     const end = input.selectionEnd;
-    const selectedText = taskDesc.substring(start, end);
+    const selectedText = value.substring(start, end);
 
     let formatted = "";
     switch (formatType) {
@@ -324,8 +346,8 @@ export default function TasksPage() {
         break;
     }
 
-    const newText = taskDesc.substring(0, start) + formatted + taskDesc.substring(end);
-    setTaskDesc(newText);
+    const newText = value.substring(0, start) + formatted + value.substring(end);
+    setValue(newText);
   };
 
   const toggleAssignee = (memberId: string) => {
@@ -380,7 +402,6 @@ export default function TasksPage() {
 
     setCreatingTask(true);
 
-    // Self-Assignment Safeguard: If the assigner included themselves in assignees, disable extra leadership points
     const isSelfAssigned = taskType === "direct" && selectedAssignees.includes(profile.id);
 
     const { data: newTasks, error } = await supabase.from("tasks").insert({
@@ -392,7 +413,7 @@ export default function TasksPage() {
       deadline: taskDeadline,
       status: "pending",
       max_claims: taskType === "floating" ? maxClaims : null,
-      assigner_rewarded: isSelfAssigned // If self-assigned, prevent duplicate leadership bonus points
+      assigner_rewarded: isSelfAssigned
     }).select();
 
     if (error || !newTasks || newTasks.length === 0) {
@@ -450,6 +471,92 @@ export default function TasksPage() {
     fetchPageData();
   }
 
+  // Handle Edit Task Update
+  async function handleUpdateTask(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingTask || !editTitle || !editDeadline) return;
+    setIsUpdatingTask(true);
+
+    const { error } = await supabase
+      .from("tasks")
+      .update({
+        title: editTitle,
+        description: editDesc,
+        points: editPoints,
+        deadline: editDeadline
+      })
+      .eq("id", editingTask.id);
+
+    if (error) {
+      setAlertModal({ isOpen: true, message: "Failed to update task: " + error.message });
+    } else {
+      setAlertModal({ isOpen: true, message: "Task updated successfully!" });
+      setEditingTask(null);
+      fetchPageData();
+    }
+    setIsUpdatingTask(false);
+  }
+
+  // Handle Manual Completion Override (No Penalties / Normal Delivery)
+  async function handleConfirmManualCompletion() {
+    if (!manualCompleteState) return;
+    setIsCompletingManually(true);
+
+    const { taskId, assignmentId, userId, userName } = manualCompleteState;
+    const task = tasks.find(t => t.id === taskId);
+    const earnedPoints = task?.points || 10;
+
+    await supabase
+      .from("task_assignments")
+      .update({ status: "completed" })
+      .eq("id", assignmentId);
+
+    await supabase.from("points_ledger").insert({
+      profile_id: userId,
+      task_id: taskId,
+      points_awarded: earnedPoints,
+      reason: `Task Deliverable Approved (Manual Lead Completion): "${task?.title}"`
+    });
+
+    const isSelfAssigned = task?.assignments?.some((a: any) => a.user_id === task.assigned_by);
+    if (task && !task.assigner_rewarded && task.assigned_by && !isSelfAssigned) {
+      await supabase.from("tasks").update({ assigner_rewarded: true }).eq("id", task.id);
+
+      await supabase.from("points_ledger").insert({
+        profile_id: task.assigned_by,
+        task_id: task.id,
+        points_awarded: earnedPoints,
+        reason: `✨ Task Leadership Reward (+${earnedPoints} PTS): Assigned task "${task.title}" was completed.`
+      });
+    }
+
+    const { data: currentAssignments } = await supabase
+      .from("task_assignments")
+      .select("status")
+      .eq("task_id", taskId);
+
+    const allCompleted = currentAssignments?.every(a => a.status === "completed");
+    if (allCompleted) {
+      await supabase.from("tasks").update({ status: "completed" }).eq("id", taskId);
+    }
+
+    const notifTitle = `🎉 Task Manually Marked Completed! +${earnedPoints} PTS`;
+    const notifMsg = `Your task "${task?.title}" was marked completed by ${profile?.full_name}. +${earnedPoints} PTS added!`;
+
+    await supabase.from("notifications").insert({
+      title: notifTitle,
+      message: notifMsg,
+      target_user_id: userId,
+      type: "task"
+    });
+    await triggerPushNotification(notifTitle, notifMsg, userId);
+
+    setIsCompletingManually(false);
+    setManualCompleteState(null);
+    fetchPageData();
+    setAlertModal({ isOpen: true, message: `Successfully marked task completed for ${userName}. Earned +${earnedPoints} PTS!` });
+  }
+
   async function confirmAndDeleteTask() {
     if (!deleteModal.taskId) return;
     setIsDeleting(true);
@@ -467,7 +574,6 @@ export default function TasksPage() {
 
     const isSelfAssigned = newAssigneeIds.includes(profile.id);
 
-    // Update task assigner_rewarded if self assigned
     if (isSelfAssigned) {
       await supabase.from("tasks").update({ assigner_rewarded: true }).eq("id", reassignTask.id);
     }
@@ -536,14 +642,12 @@ export default function TasksPage() {
     }).eq("id", submission.id);
 
     if (status === "approved") {
-      // 1. Mark assignment completed
       await supabase
         .from("task_assignments")
         .update({ status: "completed" })
         .eq("task_id", submission.task_id)
         .eq("user_id", submission.member_id);
 
-      // 2. Award completion points to member
       await supabase.from("points_ledger").insert({
         profile_id: submission.member_id,
         task_id: submission.task_id,
@@ -551,7 +655,6 @@ export default function TasksPage() {
         reason: `Completed Task: ${submission.task?.title || 'Deliverable'}`
       });
 
-      // 3. Award points to ASSIGNER ONLY IF not self-assigned and not previously rewarded
       const task = tasks.find(t => t.id === submission.task_id);
       const isSelfAssigned = task?.assignments?.some((a: any) => a.user_id === task.assigned_by);
 
@@ -713,12 +816,10 @@ export default function TasksPage() {
 
   const activePendingTasks = tasks.filter(t => t.status !== "completed");
   
-  // My Direct Tasks: Floating tasks OR tasks assigned to me
   const myDirectAndFloatingTasks = activePendingTasks.filter(t => 
     t.assigned_to === null || t.assignments?.some((a: any) => a.user_id === profile?.id)
   );
   
-  // All Chapter Tasks: Shows ALL pending chapter tasks for record keeping
   const allChapterTasks = activePendingTasks;
 
   const completedTasks = tasks.filter(t => t.status === "completed" || t.assignments?.every((a: any) => a.status === "completed"));
@@ -849,7 +950,6 @@ export default function TasksPage() {
                 const hasMySubmitted = myAssignment?.status === "submitted";
                 const hasMyCompleted = myAssignment?.status === "completed";
 
-                // Format Deadline Date & Time
                 const formattedDeadline = new Date(task.deadline).toLocaleString([], {
                   dateStyle: "medium",
                   timeStyle: "short"
@@ -885,7 +985,6 @@ export default function TasksPage() {
                     </div>
 
                     <div className="space-y-2.5 pt-3 border-t border-[var(--text-muted)]/10">
-                      {/* Deadline Date & Time + Live Countdown Timer */}
                       <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
                         <div className="flex items-center gap-1 opacity-70">
                           <Clock className="w-3 h-3 text-amber-500 shrink-0" />
@@ -899,7 +998,6 @@ export default function TasksPage() {
                         <span className="text-amber-500">{task.assigner?.full_name || "Executive Board"}</span>
                       </div>
 
-                      {/* Grouped Assignee List */}
                       <div className="space-y-1 pt-2 border-t border-[var(--text-muted)]/10">
                         <p className="text-[9px] font-extrabold uppercase tracking-widest text-emerald-500">
                           Assigned Members ({assignments.length}):
@@ -908,24 +1006,36 @@ export default function TasksPage() {
                         {assignments.length === 0 ? (
                           <p className="text-[10px] opacity-50 italic">No assignees yet (Floating Task)</p>
                         ) : (
-                          <div className="max-h-32 overflow-y-auto space-y-1 neo-pressed rounded-xl p-2 custom-scrollbar">
+                          <div className="max-h-36 overflow-y-auto space-y-1 neo-pressed rounded-xl p-2 custom-scrollbar">
                             {assignments.map((a: any) => (
-                              <div key={a.id} className="flex items-center justify-between text-[10px] py-1 border-b border-white/5 last:border-0">
+                              <div key={a.id} className="flex items-center justify-between text-[10px] py-1 border-b border-white/5 last:border-0 gap-2">
                                 <span className="font-bold truncate opacity-90">{a.user?.full_name}</span>
-                                <span className={`font-black uppercase text-[8px] px-2 py-0.5 rounded ${
-                                  a.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
-                                  a.status === 'submitted' ? 'bg-amber-500/20 text-amber-400' :
-                                  a.status === 'overdue' ? 'bg-rose-500/20 text-rose-400' : 'bg-gray-500/20 text-gray-400'
-                                }`}>
-                                  {a.status}
-                                </span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className={`font-black uppercase text-[8px] px-2 py-0.5 rounded ${
+                                    a.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
+                                    a.status === 'submitted' ? 'bg-amber-500/20 text-amber-400' :
+                                    a.status === 'overdue' ? 'bg-rose-500/20 text-rose-400' : 'bg-gray-500/20 text-gray-400'
+                                  }`}>
+                                    {a.status}
+                                  </span>
+
+                                  {isLead && a.status !== 'completed' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setManualCompleteState({ taskId: task.id, assignmentId: a.id, userId: a.user_id, userName: a.user?.full_name })}
+                                      className="px-2 py-0.5 neo-btn text-emerald-500 hover:bg-emerald-500/10 rounded text-[8px] font-extrabold uppercase flex items-center gap-0.5 transition-all cursor-pointer"
+                                      title="Manually Mark Completed (Full Points, No Deduction)"
+                                    >
+                                      <Check className="w-2.5 h-2.5" /> Mark Done
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </div>
                         )}
                       </div>
 
-                      {/* Floating Task Claim Button */}
                       {isFloating && !myAssignment && (
                         <button
                           onClick={() => handleClaimTask(task.id)}
@@ -946,7 +1056,6 @@ export default function TasksPage() {
                         </button>
                       )}
 
-                      {/* Submit Deliverable Button */}
                       {myAssignment && myAssignment.status === 'pending' && (
                         <button
                           onClick={() => setSelectedTask(task)}
@@ -968,21 +1077,32 @@ export default function TasksPage() {
                         </div>
                       )}
 
-                      {/* Lead Controls */}
                       {isLead && (
-                        <div className="flex items-center gap-2 pt-2">
+                        <div className="grid grid-cols-3 gap-1.5 pt-2">
+                          <button
+                            onClick={() => {
+                              setEditingTask(task);
+                              setEditTitle(task.title);
+                              setEditDesc(task.description || "");
+                              setEditPoints(task.points || 10);
+                              setEditDeadline(formatForDateTimeLocal(task.deadline));
+                            }}
+                            className="py-2 neo-btn rounded-xl text-[9px] font-extrabold uppercase tracking-wider text-emerald-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
+                          >
+                            <Edit3 className="w-3 h-3" /> Edit
+                          </button>
                           <button
                             onClick={() => { 
                               setReassignTask(task); 
                               setNewAssigneeIds(assignments.map((a: any) => a.user_id)); 
                             }}
-                            className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
+                            className="py-2 neo-btn rounded-xl text-[9px] font-extrabold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
                           >
                             <UserPlus className="w-3 h-3" /> Re-assign
                           </button>
                           <button
                             onClick={() => setDeleteModal({ isOpen: true, taskId: task.id, title: task.title })}
-                            className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-rose-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
+                            className="py-2 neo-btn rounded-xl text-[9px] font-extrabold uppercase tracking-wider text-rose-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
                           >
                             <Trash2 className="w-3 h-3" /> Delete
                           </button>
@@ -1483,6 +1603,144 @@ export default function TasksPage() {
             {issuingPenalty ? <Loader2 className="w-4 h-4 animate-spin" /> : <><TrendingDown className="w-4 h-4" /> Issue Penalty & Deduct Points</>}
           </button>
         </form>
+      )}
+
+      {/* Edit Task Modal */}
+      {editingTask && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={handleUpdateTask} className="w-full max-w-md neo-flat rounded-2xl p-6 space-y-4 animate-in zoom-in-95 bg-[var(--bg-base)] border border-white/10 shadow-2xl">
+            <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Edit Task Details</h3>
+
+            <div>
+              <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Task Title</label>
+              <input
+                type="text"
+                required
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Reward Points</label>
+                <select
+                  required
+                  value={editPoints}
+                  onChange={(e) => setEditPoints(parseInt(e.target.value))}
+                  className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-medium cursor-pointer"
+                >
+                  <option value={5} className="bg-[var(--bg-surface)]">5 Points</option>
+                  <option value={10} className="bg-[var(--bg-surface)]">10 Points</option>
+                  <option value={15} className="bg-[var(--bg-surface)]">15 Points</option>
+                  <option value={20} className="bg-[var(--bg-surface)]">20 Points</option>
+                  <option value={25} className="bg-[var(--bg-surface)]">25 Points</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Deadline Date & Time</label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={editDeadline}
+                  onChange={(e) => setEditDeadline(e.target.value)}
+                  className="w-full px-4 py-2.5 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Description & Resources</label>
+              <div className="flex items-center gap-1.5 p-1.5 neo-pressed rounded-xl border border-white/5">
+                <button type="button" onClick={() => applyFormatting("bold", true)} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="Bold">
+                  <Bold className="w-3.5 h-3.5" />
+                </button>
+                <button type="button" onClick={() => applyFormatting("italic", true)} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="Italic">
+                  <Italic className="w-3.5 h-3.5" />
+                </button>
+                <button type="button" onClick={() => applyFormatting("list", true)} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="List">
+                  <List className="w-3.5 h-3.5" />
+                </button>
+                <button type="button" onClick={() => applyFormatting("code", true)} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="Code">
+                  <Code className="w-3.5 h-3.5" />
+                </button>
+                <button type="button" onClick={() => applyFormatting("link", true)} className="p-1.5 neo-btn rounded-lg hover:text-emerald-500 text-xs font-bold" title="Link">
+                  <LinkIcon className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <textarea
+                ref={editAreaRef}
+                rows={4}
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium custom-scrollbar resize-none"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingTask(null)}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isUpdatingTask}
+                className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold flex justify-center items-center gap-2 cursor-pointer"
+              >
+                {isUpdatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Manual Completion Confirmation Modal */}
+      {manualCompleteState && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm neo-flat rounded-[2rem] p-6 space-y-5 bg-[var(--bg-base)] shadow-2xl border border-white/10 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-emerald-500">
+              <div className="w-10 h-10 rounded-2xl neo-pressed flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Manual Completion Override</h3>
+                <p className="text-[10px] opacity-60 font-semibold">Normal delivery approval (No penalties)</p>
+              </div>
+            </div>
+
+            <div className="neo-pressed rounded-2xl p-4 space-y-1 text-xs">
+              <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Assignee Member:</p>
+              <p className="font-bold text-emerald-400">{manualCompleteState.userName}</p>
+              <p className="text-[10px] opacity-70 pt-2 leading-relaxed">
+                This will mark the deliverable completed and award full reward points to {manualCompleteState.userName} without applying any late penalties.
+              </p>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setManualCompleteState(null)}
+                className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isCompletingManually}
+                onClick={handleConfirmManualCompletion}
+                className="w-1/2 py-3 neo-btn-green rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {isCompletingManually ? <Loader2 className="w-4 h-4 animate-spin" /> : "Mark Completed"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Re-assign Task Modal */}
