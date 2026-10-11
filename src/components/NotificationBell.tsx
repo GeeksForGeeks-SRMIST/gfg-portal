@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Bell, Trash2, X, ExternalLink, CheckCircle2, Loader2, Smartphone, Sparkles } from "lucide-react";
 
@@ -14,6 +14,33 @@ export function NotificationBell() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
+
+  // Fetch notifications for current logged-in user OR broadcast alerts (user_id IS NULL)
+  const fetchNotifications = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    let query = supabase
+      .from("notifications")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(30);
+
+    if (user?.id) {
+      query = query.or(`user_id.eq.${user.id},user_id.is.null`);
+    } else {
+      query = query.is("user_id", null);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Error fetching notification log:", error.message);
+      return;
+    }
+
+    setNotifications(data || []);
+    setUnreadCount(data?.length || 0);
+  }, [supabase]);
 
   useEffect(() => {
     fetchNotifications();
@@ -37,6 +64,7 @@ export function NotificationBell() {
     document.addEventListener("mousedown", handleClickOutside);
     window.addEventListener("gfg_notice_dispatched", handleLocalNoticeDispatched);
 
+    // Subscribe to real-time notification inserts
     const channelName = `realtime_notifications_bell_${Math.random().toString(36).substring(7)}`;
     const channel = supabase
       .channel(channelName)
@@ -60,7 +88,7 @@ export function NotificationBell() {
       window.removeEventListener("gfg_notice_dispatched", handleLocalNoticeDispatched);
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [fetchNotifications, supabase]);
 
   function checkDeviceAndPermission() {
     if (typeof window !== "undefined") {
@@ -135,22 +163,6 @@ export function NotificationBell() {
     }
   }
 
-  async function fetchNotifications() {
-    const { data, error } = await supabase
-      .from("notifications")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(30);
-
-    if (error) {
-      console.error("Error fetching notification log:", error.message);
-      return;
-    }
-
-    setNotifications(data || []);
-    setUnreadCount(data?.length || 0);
-  }
-
   async function deleteNotification(id: string) {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
     setUnreadCount((prev) => Math.max(0, prev - 1));
@@ -168,7 +180,14 @@ export function NotificationBell() {
     setUnreadCount(0);
     setNotifications([]);
 
-    const { error } = await supabase.from("notifications").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("notifications")
+      .delete()
+      .or(`user_id.eq.${user.id},user_id.is.null`);
+
     if (error) {
       console.error("Error clearing notification log:", error.message);
       fetchNotifications();

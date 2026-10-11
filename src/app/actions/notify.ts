@@ -1,50 +1,60 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient as createServerClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
+
+// Admin Supabase client using Service Role Key to bypass RLS for system notification writes
+function getAdminSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
 
 export async function sendNotificationToAll(
   title: string,
   message: string,
   link: string = "/dashboard/notices"
 ) {
-  const supabase = await createClient();
-
-  // 1. Verify active session
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 1. Verify active user session
+  const userSupabase = await createServerClient();
+  const { data: { user } } = await userSupabase.auth.getUser();
 
   if (!user) {
     return { success: false, error: "Unauthorized access: Session expired." };
   }
 
-  // 2. Record broadcast notification in database history
-  const { data: newNotifRecord, error: notifErr } = await supabase.rpc(
-    "create_broadcast_notification",
-    {
-      p_title: title,
-      p_message: message,
-      p_link: link,
-    }
-  );
+  // 2. Insert broadcast notification into notifications table using Admin Client
+  const adminSupabase = getAdminSupabase();
+  const { data: newNotifRecord, error: notifErr } = await adminSupabase
+    .from("notifications")
+    .insert({
+      user_id: null, // null denotes a global/broadcast notification
+      title,
+      message,
+      link,
+      type: "info",
+    })
+    .select()
+    .single();
 
   if (notifErr) {
-    console.error("Failed to record broadcast notification:", notifErr.message);
+    console.error("Database notification insert error:", notifErr.message);
   }
 
-  // 3. Verify OneSignal Keys
+  // 3. Dispatch Push Alert via OneSignal REST API
   const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
   const apiKey = process.env.ONESIGNAL_REST_API_KEY;
 
   if (!appId || !apiKey) {
     return {
-      success: false,
-      error: "OneSignal API keys are missing in server environment variables.",
+      success: true,
       notif: newNotifRecord,
+      warning: "OneSignal API keys missing; saved to database history only.",
     };
   }
 
-  // 4. Dispatch Push Alert via OneSignal REST API
   try {
     const targetUrl = link.startsWith("http")
       ? link
@@ -69,17 +79,9 @@ export async function sendNotificationToAll(
 
     const data = await res.json();
 
-    if (!res.ok) {
-      return {
-        success: false,
-        error: data?.errors?.[0] || "OneSignal push dispatch failed.",
-        notif: newNotifRecord,
-      };
-    }
-
     return {
-      success: true,
-      recipients: data.recipients || 1,
+      success: res.ok,
+      recipients: data?.recipients || 1,
       notif: newNotifRecord,
     };
   } catch (err: any) {
@@ -103,15 +105,15 @@ export async function sendNotification(options: {
     return sendNotificationToAll(title, message, link);
   }
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const userSupabase = await createServerClient();
+  const { data: { user } } = await userSupabase.auth.getUser();
 
   if (!user) {
     return { success: false, error: "Unauthorized access: Session expired." };
   }
 
-  // Insert targeted notification into database
-  const { data: newNotifRecord, error: notifErr } = await supabase
+  const adminSupabase = getAdminSupabase();
+  const { data: newNotifRecord, error: notifErr } = await adminSupabase
     .from("notifications")
     .insert({
       user_id: target_user_id,
@@ -124,7 +126,7 @@ export async function sendNotification(options: {
     .single();
 
   if (notifErr) {
-    console.error("Failed to insert targeted notification:", notifErr.message);
+    console.error("Targeted notification insert error:", notifErr.message);
   }
 
   const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
