@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { 
   CheckSquare, 
@@ -24,8 +24,59 @@ import {
   Italic,
   List,
   Code,
-  Link as LinkIcon
+  Link as LinkIcon,
+  XCircle,
+  AlertCircle
 } from "lucide-react";
+
+// Live Countdown Timer Component
+function CountdownTimer({ deadline }: { deadline: string }) {
+  const [timeLeft, setTimeLeft] = useState<{
+    days: number;
+    hours: number;
+    minutes: number;
+    seconds: number;
+    isOverdue: boolean;
+  }>({ days: 0, hours: 0, minutes: 0, seconds: 0, isOverdue: false });
+
+  useEffect(() => {
+    const calculateTime = () => {
+      const target = new Date(deadline).getTime();
+      const now = new Date().getTime();
+      const diff = target - now;
+
+      if (diff <= 0) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, isOverdue: true });
+      } else {
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeLeft({ days, hours, minutes, seconds, isOverdue: false });
+      }
+    };
+
+    calculateTime();
+    const timer = setInterval(calculateTime, 1000);
+    return () => clearInterval(timer);
+  }, [deadline]);
+
+  if (timeLeft.isOverdue) {
+    return (
+      <div className="flex items-center gap-1 text-[10px] font-black text-rose-500 bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20 shrink-0">
+        <AlertTriangle className="w-3 h-3" /> Overdue
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 font-mono text-[10px] font-black text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 shrink-0">
+      <Clock className="w-3 h-3" />
+      {timeLeft.days > 0 && `${timeLeft.days}d `}
+      {String(timeLeft.hours).padStart(2, "0")}h {String(timeLeft.minutes).padStart(2, "0")}m {String(timeLeft.seconds).padStart(2, "0")}s
+    </div>
+  );
+}
 
 export default function TasksPage() {
   const [profile, setProfile] = useState<any>(null);
@@ -34,22 +85,22 @@ export default function TasksPage() {
   const [ledger, setLedger] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Dynamic Tab State
   const [activeTab, setActiveTab] = useState<"assigned" | "submissions" | "completed" | "ledger" | "create" | "bonus" | "penalty">("assigned");
 
   // Filter Sub-tab for Leads
   const [taskViewFilter, setTaskViewFilter] = useState<"my_tasks" | "all_chapter_tasks">("my_tasks");
 
-  // Domain Filter States for Member Dropdowns
+  // Domain Filter States
   const [taskDomainFilter, setTaskDomainFilter] = useState("all");
   const [bonusDomainFilter, setBonusDomainFilter] = useState("all");
   const [penaltyDomainFilter, setPenaltyDomainFilter] = useState("all");
 
-  // Re-assign Task Modal State
+  // Re-assign Modal State
   const [reassignTask, setReassignTask] = useState<any>(null);
   const [reassignDomainFilter, setReassignDomainFilter] = useState("all");
-  const [newAssigneeId, setNewAssigneeId] = useState("");
+  const [newAssigneeIds, setNewAssigneeIds] = useState<string[]>([]);
   const [isReassigning, setIsReassigning] = useState(false);
 
   // Claim Floating Task State
@@ -100,12 +151,105 @@ export default function TasksPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
 
+  const fetchPageData = useCallback(async () => {
+    setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: pData } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    setProfile(pData);
+
+    const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(pData?.role);
+
+    // Fetch grouped tasks with assigner profile, assignments, and member details
+    let taskQuery = supabase
+      .from("tasks")
+      .select(`
+        *,
+        assigner:profiles!tasks_assigned_by_fkey(full_name, role),
+        assignments:task_assignments(
+          id,
+          user_id,
+          status,
+          user:profiles!task_assignments_user_id_fkey(id, full_name, domain, role)
+        )
+      `)
+      .order("created_at", { ascending: false });
+
+    const { data: tData } = await taskQuery;
+    let fetchedTasks = tData || [];
+
+    if (!isLead) {
+      fetchedTasks = fetchedTasks.filter((t) => 
+        t.assigned_to === null || t.assignments?.some((a: any) => a.user_id === user.id)
+      );
+    }
+
+    // Process Overdue Penalties automatically
+    const now = new Date();
+    for (const task of fetchedTasks) {
+      if (new Date(task.deadline) < now) {
+        for (const assign of task.assignments || []) {
+          if (assign.status === "pending") {
+            await supabase
+              .from("task_assignments")
+              .update({ status: "overdue" })
+              .eq("id", assign.id);
+
+            await supabase.from("points_ledger").insert({
+              profile_id: assign.user_id,
+              task_id: task.id,
+              points_awarded: -5,
+              reason: `⚠️ Non-completion Penalty (-5 PTS): "${task.title}"`
+            });
+
+            const notifTitle = `⚠️ Task Overdue Penalty: -5 PTS`;
+            const notifMsg = `You missed the deadline for task "${task.title}". -5 PTS deducted.`;
+            await supabase.from("notifications").insert({
+              title: notifTitle,
+              message: notifMsg,
+              target_user_id: assign.user_id,
+              type: "reminder"
+            });
+
+            assign.status = "overdue";
+          }
+        }
+      }
+    }
+
+    setTasks(fetchedTasks);
+
+    // Fetch Submissions Queue
+    const { data: subData } = await supabase
+      .from("task_submissions")
+      .select("*, task:tasks(*), member:profiles!task_submissions_member_id_fkey(id, full_name, domain, role)")
+      .order("created_at", { ascending: false });
+    
+    setSubmissions(subData || []);
+
+    // Fetch Ledger
+    const { data: lData } = await supabase
+      .from("points_ledger")
+      .select("*")
+      .eq("profile_id", user.id)
+      .order("created_at", { ascending: false });
+    setLedger(lData || []);
+
+    // Fetch Members
+    const { data: mData } = await supabase.from("profiles").select("id, full_name, domain, role").eq("status", "approved");
+    setMembers(mData || []);
+
+    setLoading(false);
+  }, [supabase]);
+
   useEffect(() => {
     fetchPageData();
 
     const channel = supabase
       .channel("tasks_realtime_full")
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => fetchPageData())
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_assignments" }, () => fetchPageData())
       .on("postgres_changes", { event: "*", schema: "public", table: "task_submissions" }, () => fetchPageData())
       .on("postgres_changes", { event: "*", schema: "public", table: "points_ledger" }, () => fetchPageData())
       .subscribe();
@@ -113,7 +257,7 @@ export default function TasksPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [fetchPageData, supabase]);
 
   const getRoleRank = (roleStr: string) => {
     const ranks: Record<string, number> = {
@@ -128,6 +272,9 @@ export default function TasksPage() {
   };
 
   const canReviewSubmission = (reviewerRole: string, submitterRole: string) => {
+    if (!reviewerRole) return false;
+    if (reviewerRole === "president") return true;
+    if (!submitterRole) return true;
     return getRoleRank(reviewerRole) < getRoleRank(submitterRole);
   };
 
@@ -135,16 +282,9 @@ export default function TasksPage() {
     try {
       await fetch("/api/webhooks/push", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          record: {
-            title,
-            message,
-            link,
-            target_user_id: targetUserId
-          }
+          record: { title, message, link, target_user_id: targetUserId }
         }),
       });
     } catch (err) {
@@ -152,48 +292,7 @@ export default function TasksPage() {
     }
   }
 
-  async function fetchPageData() {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: pData } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-    setProfile(pData);
-
-    const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(pData?.role);
-
-    let taskQuery = supabase
-      .from("tasks")
-      .select("*, assigned_member:profiles!tasks_assigned_to_fkey(full_name, domain, role), assigner:profiles!tasks_assigned_by_fkey(full_name, role)")
-      .order("created_at", { ascending: false });
-
-    if (!isLead) {
-      taskQuery = taskQuery.or(`assigned_to.eq.${user.id},assigned_to.is.null`);
-    }
-
-    const { data: tData } = await taskQuery;
-    setTasks(tData || []);
-
-    const { data: subData } = await supabase
-      .from("task_submissions")
-      .select("*, task:tasks(*), member:profiles!task_submissions_member_id_fkey(id, full_name, domain, role)")
-      .order("created_at", { ascending: false });
-    
-    setSubmissions(subData || []);
-
-    const { data: lData } = await supabase
-      .from("points_ledger")
-      .select("*")
-      .eq("profile_id", user.id)
-      .order("created_at", { ascending: false });
-    setLedger(lData || []);
-
-    const { data: mData } = await supabase.from("profiles").select("id, full_name, domain, role").eq("status", "approved");
-    setMembers(mData || []);
-
-    setLoading(false);
-  }
-
+  // Domain filter helper
   const filterMembersByDomain = (domain: string) => {
     if (domain === "all") return members;
     return members.filter(m => m.domain?.toLowerCase() === domain.toLowerCase());
@@ -238,36 +337,278 @@ export default function TasksPage() {
   async function handleClaimTask(taskId: string) {
     setClaimingTaskId(taskId);
     
-    const { count } = await supabase
-      .from("tasks")
-      .select("*", { count: "exact", head: true })
-      .eq("parent_task_id", taskId);
+    const task = tasks.find(t => t.id === taskId);
+    const currentClaims = task?.assignments?.length || 0;
+    const maxAllowed = task?.max_claims || 3;
 
-    const parentTask = tasks.find(t => t.id === taskId);
-    if (parentTask?.max_claims && (count || 0) >= parentTask.max_claims) {
-      setAlertModal({ isOpen: true, message: "Claim limit reached for this floating task." });
+    if (currentClaims >= maxAllowed) {
+      setAlertModal({ isOpen: true, message: "Claim capacity reached for this floating task." });
       setClaimingTaskId(null);
       return;
     }
 
-    const { error } = await supabase.from("tasks").insert({
-      title: parentTask.title,
-      description: parentTask.description,
-      assigned_to: profile.id,
-      assigned_by: parentTask.assigned_by,
-      points: parentTask.points,
-      deadline: parentTask.deadline,
-      status: "pending",
-      parent_task_id: taskId
+    const alreadyClaimed = task?.assignments?.some((a: any) => a.user_id === profile.id);
+    if (alreadyClaimed) {
+      setAlertModal({ isOpen: true, message: "You have already claimed this floating task." });
+      setClaimingTaskId(null);
+      return;
+    }
+
+    const { error } = await supabase.from("task_assignments").insert({
+      task_id: taskId,
+      user_id: profile.id,
+      status: "pending"
     });
 
     if (error) {
       setAlertModal({ isOpen: true, message: "Failed to claim task: " + error.message });
     } else {
-      setAlertModal({ isOpen: true, message: "Task claimed successfully! You can now submit your work." });
+      setAlertModal({ isOpen: true, message: "Floating task claimed successfully! You can now submit deliverables." });
       fetchPageData();
     }
     setClaimingTaskId(null);
+  }
+
+  async function handleCreateTask(e: React.FormEvent) {
+    e.preventDefault();
+    if (!taskTitle || !taskDeadline) return;
+    
+    if (taskType === "direct" && selectedAssignees.length === 0) {
+      setAlertModal({ isOpen: true, message: "Please select at least one assignee for direct assignment." });
+      return;
+    }
+
+    setCreatingTask(true);
+
+    // Self-Assignment Safeguard: If the assigner included themselves in assignees, disable extra leadership points
+    const isSelfAssigned = taskType === "direct" && selectedAssignees.includes(profile.id);
+
+    const { data: newTasks, error } = await supabase.from("tasks").insert({
+      title: taskTitle,
+      description: taskDesc,
+      assigned_to: taskType === "direct" ? selectedAssignees[0] : null,
+      assigned_by: profile.id,
+      points: taskPoints || 10,
+      deadline: taskDeadline,
+      status: "pending",
+      max_claims: taskType === "floating" ? maxClaims : null,
+      assigner_rewarded: isSelfAssigned // If self-assigned, prevent duplicate leadership bonus points
+    }).select();
+
+    if (error || !newTasks || newTasks.length === 0) {
+      setAlertModal({ isOpen: true, message: "Error creating task: " + error?.message });
+      setCreatingTask(false);
+      return;
+    }
+
+    const taskId = newTasks[0].id;
+
+    if (taskType === "direct") {
+      const assignmentInserts = selectedAssignees.map((userId) => ({
+        task_id: taskId,
+        user_id: userId,
+        status: "pending"
+      }));
+
+      await supabase.from("task_assignments").insert(assignmentInserts);
+
+      const notifTitle = `📋 New Task Assigned: ${taskTitle}`;
+      const notifMsg = `You were assigned a deliverable worth ${taskPoints} PTS by ${profile?.full_name}.`;
+
+      for (const assigneeId of selectedAssignees) {
+        if (assigneeId !== profile.id) {
+          await supabase.from("notifications").insert({
+            title: notifTitle,
+            message: notifMsg,
+            target_user_id: assigneeId,
+            type: "task"
+          });
+          await triggerPushNotification(notifTitle, notifMsg, assigneeId);
+        }
+      }
+    } else {
+      const notifTitle = `🌐 New Floating Task Available: ${taskTitle}`;
+      const notifMsg = `An open deliverable worth ${taskPoints} PTS was created (${maxClaims} claims max). Claim yours now!`;
+
+      await supabase.from("notifications").insert({
+        title: notifTitle,
+        message: notifMsg,
+        target_user_id: null,
+        type: "notice"
+      });
+      await triggerPushNotification(notifTitle, notifMsg, null);
+    }
+
+    setTaskTitle("");
+    setTaskDesc("");
+    setSelectedAssignees([]);
+    setMaxClaims(3);
+    setTaskPoints(10);
+    setTaskDeadline("");
+    setCreatingTask(false);
+    setActiveTab("assigned");
+    fetchPageData();
+  }
+
+  async function confirmAndDeleteTask() {
+    if (!deleteModal.taskId) return;
+    setIsDeleting(true);
+    await supabase.from("tasks").delete().eq("id", deleteModal.taskId);
+    setIsDeleting(false);
+    setDeleteModal({ isOpen: false, taskId: null, title: "" });
+    fetchPageData();
+    setAlertModal({ isOpen: true, message: "Task deleted. Any points awarded or deducted for this task were automatically revoked." });
+  }
+
+  async function handleReassignTask(e: React.FormEvent) {
+    e.preventDefault();
+    if (!reassignTask || newAssigneeIds.length === 0) return;
+    setIsReassigning(true);
+
+    const isSelfAssigned = newAssigneeIds.includes(profile.id);
+
+    // Update task assigner_rewarded if self assigned
+    if (isSelfAssigned) {
+      await supabase.from("tasks").update({ assigner_rewarded: true }).eq("id", reassignTask.id);
+    }
+
+    await supabase.from("task_assignments").delete().eq("task_id", reassignTask.id);
+
+    const assignmentInserts = newAssigneeIds.map((userId) => ({
+      task_id: reassignTask.id,
+      user_id: userId,
+      status: "pending"
+    }));
+
+    await supabase.from("task_assignments").insert(assignmentInserts);
+
+    setReassignTask(null);
+    setNewAssigneeIds([]);
+    setIsReassigning(false);
+    fetchPageData();
+    setAlertModal({ isOpen: true, message: "Task re-assigned successfully!" });
+  }
+
+  async function handleSubmitTaskWork(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedTask) return;
+    setSubmittingWork(true);
+
+    const { error } = await supabase.from("task_submissions").insert({
+      task_id: selectedTask.id,
+      member_id: profile.id,
+      submission_link: submissionLink.trim() || null,
+      notes: submissionNotes,
+      status: "pending_review"
+    });
+
+    if (error) {
+      setAlertModal({ isOpen: true, message: "Submission failed: " + error.message });
+      setSubmittingWork(false);
+      return;
+    }
+
+    await supabase
+      .from("task_assignments")
+      .update({ status: "submitted" })
+      .eq("task_id", selectedTask.id)
+      .eq("user_id", profile.id);
+
+    setSubmissionLink("");
+    setSubmissionNotes("");
+    setSelectedTask(null);
+    setSubmittingWork(false);
+    fetchPageData();
+    setAlertModal({ isOpen: true, message: "Task deliverable submitted for review!" });
+  }
+
+  async function handleReviewSubmission(submission: any, status: "approved" | "rejected") {
+    if (!canReviewSubmission(profile?.role, submission.member?.role)) {
+      setAlertModal({ isOpen: true, message: `Hierarchy Protection: As a ${profile?.role?.replace("_", " ")}, you cannot approve deliverables submitted by a ${submission.member?.role?.replace("_", " ")}.` });
+      return;
+    }
+
+    setProcessingReview(true);
+
+    await supabase.from("task_submissions").update({
+      status,
+      reviewed_by: profile.id
+    }).eq("id", submission.id);
+
+    if (status === "approved") {
+      // 1. Mark assignment completed
+      await supabase
+        .from("task_assignments")
+        .update({ status: "completed" })
+        .eq("task_id", submission.task_id)
+        .eq("user_id", submission.member_id);
+
+      // 2. Award completion points to member
+      await supabase.from("points_ledger").insert({
+        profile_id: submission.member_id,
+        task_id: submission.task_id,
+        points_awarded: submission.task?.points || 10,
+        reason: `Completed Task: ${submission.task?.title || 'Deliverable'}`
+      });
+
+      // 3. Award points to ASSIGNER ONLY IF not self-assigned and not previously rewarded
+      const task = tasks.find(t => t.id === submission.task_id);
+      const isSelfAssigned = task?.assignments?.some((a: any) => a.user_id === task.assigned_by);
+
+      if (task && !task.assigner_rewarded && task.assigned_by && !isSelfAssigned) {
+        await supabase.from("tasks").update({ assigner_rewarded: true }).eq("id", task.id);
+
+        await supabase.from("points_ledger").insert({
+          profile_id: task.assigned_by,
+          task_id: task.id,
+          points_awarded: task.points || 10,
+          reason: `✨ Task Leadership Reward (+${task.points} PTS): Assigned task "${task.title}" was completed by a member.`
+        });
+
+        const leadNotifTitle = `✨ Task Leadership Reward: +${task.points} PTS!`;
+        const leadNotifMsg = `Your assigned task "${task.title}" was completed by ${submission.member?.full_name}. You earned ${task.points} PTS!`;
+        
+        await supabase.from("notifications").insert({
+          title: leadNotifTitle,
+          message: leadNotifMsg,
+          target_user_id: task.assigned_by,
+          type: "task"
+        });
+        await triggerPushNotification(leadNotifTitle, leadNotifMsg, task.assigned_by);
+      }
+
+      const { data: currentAssignments } = await supabase
+        .from("task_assignments")
+        .select("status")
+        .eq("task_id", submission.task_id);
+
+      const allCompleted = currentAssignments?.every(a => a.status === "completed");
+      if (allCompleted) {
+        await supabase.from("tasks").update({ status: "completed" }).eq("id", submission.task_id);
+      }
+
+      const notifTitle = `🎉 Task Approved! +${submission.task?.points || 10} PTS`;
+      const notifMsg = `Your deliverable for "${submission.task?.title}" was approved by ${profile.full_name}.`;
+
+      await supabase.from("notifications").insert({
+        title: notifTitle,
+        message: notifMsg,
+        target_user_id: submission.member_id,
+        type: "task"
+      });
+
+      await triggerPushNotification(notifTitle, notifMsg, submission.member_id);
+    } else {
+      await supabase
+        .from("task_assignments")
+        .update({ status: "pending" })
+        .eq("task_id", submission.task_id)
+        .eq("user_id", submission.member_id);
+    }
+
+    setReviewingSubmission(null);
+    setProcessingReview(false);
+    fetchPageData();
   }
 
   async function handleAwardBonus(e: React.FormEvent) {
@@ -365,222 +706,26 @@ export default function TasksPage() {
     setAlertModal({ isOpen: true, message: "Penalty applied and points deducted successfully." });
   }
 
-  async function handleCreateTask(e: React.FormEvent) {
-    e.preventDefault();
-    if (!taskTitle || !taskDeadline) return;
-    
-    if (taskType === "direct" && selectedAssignees.length === 0) {
-      setAlertModal({ isOpen: true, message: "Please select at least one assignee for direct assignment." });
-      return;
-    }
-
-    setCreatingTask(true);
-
-    if (taskType === "direct") {
-      const taskInserts = selectedAssignees.map((assigneeId) => ({
-        title: taskTitle,
-        description: taskDesc,
-        assigned_to: assigneeId,
-        assigned_by: profile.id,
-        points: taskPoints || 10,
-        deadline: taskDeadline,
-        status: "pending"
-      }));
-
-      const { error } = await supabase.from("tasks").insert(taskInserts);
-
-      if (error) {
-        setAlertModal({ isOpen: true, message: "Error creating tasks: " + error.message });
-        setCreatingTask(false);
-        return;
-      }
-
-      const notifTitle = `📋 New Task Assigned: ${taskTitle}`;
-      const notifMsg = `You were assigned a deliverable worth ${taskPoints} PTS by ${profile?.full_name}.`;
-
-      for (const assigneeId of selectedAssignees) {
-        await supabase.from("notifications").insert({
-          title: notifTitle,
-          message: notifMsg,
-          target_user_id: assigneeId,
-          type: "task"
-        });
-
-        await triggerPushNotification(notifTitle, notifMsg, assigneeId);
-      }
-    } else {
-      const { error } = await supabase.from("tasks").insert({
-        title: taskTitle,
-        description: taskDesc,
-        assigned_to: null,
-        assigned_by: profile.id,
-        points: taskPoints || 10,
-        deadline: taskDeadline,
-        status: "pending",
-        max_claims: maxClaims || 3
-      });
-
-      if (error) {
-        setAlertModal({ isOpen: true, message: "Error creating floating task: " + error.message });
-        setCreatingTask(false);
-        return;
-      }
-
-      const notifTitle = `🌐 New Floating Task Available: ${taskTitle}`;
-      const notifMsg = `An open deliverable worth ${taskPoints} PTS was created (Max ${maxClaims} claims). Claim yours now!`;
-
-      await supabase.from("notifications").insert({
-        title: notifTitle,
-        message: notifMsg,
-        target_user_id: null,
-        type: "notice"
-      });
-
-      await triggerPushNotification(notifTitle, notifMsg, null);
-    }
-
-    setTaskTitle("");
-    setTaskDesc("");
-    setSelectedAssignees([]);
-    setMaxClaims(3);
-    setTaskPoints(10);
-    setTaskDeadline("");
-    setCreatingTask(false);
-    setActiveTab("assigned");
-    fetchPageData();
-  }
-
-  async function confirmAndDeleteTask() {
-    if (!deleteModal.taskId) return;
-    setIsDeleting(true);
-    await supabase.from("tasks").delete().eq("id", deleteModal.taskId);
-    setIsDeleting(false);
-    setDeleteModal({ isOpen: false, taskId: null, title: "" });
-    fetchPageData();
-  }
-
-  async function handleReassignTask(e: React.FormEvent) {
-    e.preventDefault();
-    if (!reassignTask || !newAssigneeId) return;
-    setIsReassigning(true);
-
-    const targetAssignedTo = newAssigneeId === "floating" ? null : newAssigneeId;
-
-    await supabase.from("tasks").update({ assigned_to: targetAssignedTo }).eq("id", reassignTask.id);
-
-    if (targetAssignedTo) {
-      const notifTitle = `📋 Task Re-assigned: ${reassignTask.title}`;
-      const notifMsg = `A deliverable was re-assigned to you by ${profile?.full_name}.`;
-
-      await supabase.from("notifications").insert({
-        title: notifTitle,
-        message: notifMsg,
-        target_user_id: targetAssignedTo,
-        type: "task"
-      });
-
-      await triggerPushNotification(notifTitle, notifMsg, targetAssignedTo);
-    } else {
-      const notifTitle = `🌐 Task Made Floating: ${reassignTask.title}`;
-      const notifMsg = `A deliverable is now unassigned and available for anyone to claim!`;
-
-      await supabase.from("notifications").insert({
-        title: notifTitle,
-        message: notifMsg,
-        target_user_id: null,
-        type: "notice"
-      });
-
-      await triggerPushNotification(notifTitle, notifMsg, null);
-    }
-
-    setReassignTask(null);
-    setNewAssigneeId("");
-    setIsReassigning(false);
-    fetchPageData();
-  }
-
-  async function handleSubmitTaskWork(e: React.FormEvent) {
-    e.preventDefault();
-    if (!selectedTask) return;
-    setSubmittingWork(true);
-
-    const { error } = await supabase.from("task_submissions").insert({
-      task_id: selectedTask.id,
-      member_id: profile.id,
-      submission_link: submissionLink.trim() || null,
-      notes: submissionNotes,
-      status: "pending_review"
-    });
-
-    if (error) {
-      setAlertModal({ isOpen: true, message: "Submission failed: " + error.message });
-      setSubmittingWork(false);
-      return;
-    }
-
-    setSubmissionLink("");
-    setSubmissionNotes("");
-    setSelectedTask(null);
-    setSubmittingWork(false);
-    fetchPageData();
-    setAlertModal({ isOpen: true, message: "Task deliverable submitted for review!" });
-  }
-
-  async function handleReviewSubmission(submission: any, status: "approved" | "rejected") {
-    if (!canReviewSubmission(profile.role, submission.member?.role)) {
-      setAlertModal({ isOpen: true, message: `Hierarchy Protection: As a ${profile.role.replace("_", " ")}, you cannot approve deliverables submitted by a ${submission.member?.role?.replace("_", " ")}.` });
-      return;
-    }
-
-    setProcessingReview(true);
-
-    await supabase.from("task_submissions").update({
-      status,
-      reviewed_by: profile.id
-    }).eq("id", submission.id);
-
-    if (status === "approved") {
-      await supabase.from("tasks").update({ status: "completed" }).eq("id", submission.task_id);
-
-      await supabase.from("points_ledger").insert({
-        profile_id: submission.member_id,
-        points_awarded: submission.task?.points || 10,
-        reason: `Completed Task: ${submission.task?.title || 'Deliverable'}`
-      });
-
-      const notifTitle = `🎉 Task Approved! +${submission.task?.points || 10} PTS`;
-      const notifMsg = `Your deliverable for "${submission.task?.title}" was approved by ${profile.full_name}.`;
-
-      await supabase.from("notifications").insert({
-        title: notifTitle,
-        message: notifMsg,
-        target_user_id: submission.member_id,
-        type: "task"
-      });
-
-      await triggerPushNotification(notifTitle, notifMsg, submission.member_id);
-    }
-
-    setReviewingSubmission(null);
-    setProcessingReview(false);
-    fetchPageData();
-  }
-
   const isLead = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(profile?.role);
   const isExecutiveLead = ['president', 'secretary', 'joint_secretary'].includes(profile?.role);
   const isPresident = profile?.role === 'president';
   const myTotalPoints = ledger.reduce((acc, item) => acc + item.points_awarded, 0);
 
   const activePendingTasks = tasks.filter(t => t.status !== "completed");
-  const myDirectAndFloatingTasks = activePendingTasks.filter(t => t.assigned_to === profile?.id || t.assigned_to === null);
-  const otherMembersTasks = activePendingTasks.filter(t => t.assigned_to !== profile?.id && t.assigned_to !== null);
+  
+  // My Direct Tasks: Floating tasks OR tasks assigned to me
+  const myDirectAndFloatingTasks = activePendingTasks.filter(t => 
+    t.assigned_to === null || t.assignments?.some((a: any) => a.user_id === profile?.id)
+  );
+  
+  // All Chapter Tasks: Shows ALL pending chapter tasks for record keeping
+  const allChapterTasks = activePendingTasks;
 
-  const completedTasks = tasks.filter(t => t.status === "completed");
+  const completedTasks = tasks.filter(t => t.status === "completed" || t.assignments?.every((a: any) => a.status === "completed"));
   const pendingSubmissionsCount = submissions.filter(s => s.status === "pending_review").length;
 
   const currentDisplayTasks = isLead 
-    ? (taskViewFilter === "my_tasks" ? myDirectAndFloatingTasks : otherMembersTasks)
+    ? (taskViewFilter === "my_tasks" ? myDirectAndFloatingTasks : allChapterTasks)
     : myDirectAndFloatingTasks;
 
   return (
@@ -676,7 +821,7 @@ export default function TasksPage() {
                   taskViewFilter === "all_chapter_tasks" ? "neo-flat text-amber-500" : "opacity-60"
                 }`}
               >
-                <Users className="w-3.5 h-3.5" /> All Chapter Tasks ({otherMembersTasks.length})
+                <Users className="w-3.5 h-3.5" /> All Chapter Tasks ({allChapterTasks.length})
               </button>
             </div>
           )}
@@ -688,7 +833,7 @@ export default function TasksPage() {
               <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-500" />
               <p className="text-xs font-bold">
                 {isLead && taskViewFilter === "all_chapter_tasks" 
-                  ? "No tasks currently assigned to other team members." 
+                  ? "No tasks currently recorded in chapter." 
                   : "No pending tasks assigned to you right now."}
               </p>
             </div>
@@ -696,9 +841,19 @@ export default function TasksPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {currentDisplayTasks.map((task) => {
                 const isFloating = task.assigned_to === null;
-                const claimedCount = tasks.filter(t => t.parent_task_id === task.id).length;
+                const assignments = task.assignments || [];
                 const maxAllowed = task.max_claims || 3;
-                const isFullyClaimed = isFloating && claimedCount >= maxAllowed;
+                const isFullyClaimed = isFloating && assignments.length >= maxAllowed;
+
+                const myAssignment = assignments.find((a: any) => a.user_id === profile?.id);
+                const hasMySubmitted = myAssignment?.status === "submitted";
+                const hasMyCompleted = myAssignment?.status === "completed";
+
+                // Format Deadline Date & Time
+                const formattedDeadline = new Date(task.deadline).toLocaleString([], {
+                  dateStyle: "medium",
+                  timeStyle: "short"
+                });
 
                 return (
                   <div
@@ -713,7 +868,7 @@ export default function TasksPage() {
                       <div className="flex items-center justify-between gap-2">
                         {isFloating ? (
                           <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-teal-500/10 text-teal-400 border-teal-500/30 flex items-center gap-1">
-                            <Globe className="w-2.5 h-2.5" /> Floating ({claimedCount}/{maxAllowed} Claimed)
+                            <Globe className="w-2.5 h-2.5" /> Floating ({assignments.length}/{maxAllowed} Claimed)
                           </span>
                         ) : (
                           <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-amber-500/10 text-amber-500 border-amber-500/20">
@@ -730,16 +885,13 @@ export default function TasksPage() {
                     </div>
 
                     <div className="space-y-2.5 pt-3 border-t border-[var(--text-muted)]/10">
-                      <div className="flex items-center justify-between text-[10px] font-bold opacity-60">
-                        <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-amber-500" /> Deadline:</span>
-                        <span>{new Date(task.deadline).toLocaleDateString()}</span>
-                      </div>
-
-                      <div className="flex items-center justify-between text-[10px] font-bold">
-                        <span className="opacity-50">Assigned To:</span>
-                        <span className={isFloating ? "text-teal-400 font-extrabold" : "text-emerald-500"}>
-                          {isFloating ? "Floating Task" : task.assigned_member?.full_name}
-                        </span>
+                      {/* Deadline Date & Time + Live Countdown Timer */}
+                      <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
+                        <div className="flex items-center gap-1 opacity-70">
+                          <Clock className="w-3 h-3 text-amber-500 shrink-0" />
+                          <span className="truncate">{formattedDeadline}</span>
+                        </div>
+                        <CountdownTimer deadline={task.deadline} />
                       </div>
 
                       <div className="flex items-center justify-between text-[10px] font-bold">
@@ -747,7 +899,34 @@ export default function TasksPage() {
                         <span className="text-amber-500">{task.assigner?.full_name || "Executive Board"}</span>
                       </div>
 
-                      {isFloating && (
+                      {/* Grouped Assignee List */}
+                      <div className="space-y-1 pt-2 border-t border-[var(--text-muted)]/10">
+                        <p className="text-[9px] font-extrabold uppercase tracking-widest text-emerald-500">
+                          Assigned Members ({assignments.length}):
+                        </p>
+                        
+                        {assignments.length === 0 ? (
+                          <p className="text-[10px] opacity-50 italic">No assignees yet (Floating Task)</p>
+                        ) : (
+                          <div className="max-h-32 overflow-y-auto space-y-1 neo-pressed rounded-xl p-2 custom-scrollbar">
+                            {assignments.map((a: any) => (
+                              <div key={a.id} className="flex items-center justify-between text-[10px] py-1 border-b border-white/5 last:border-0">
+                                <span className="font-bold truncate opacity-90">{a.user?.full_name}</span>
+                                <span className={`font-black uppercase text-[8px] px-2 py-0.5 rounded ${
+                                  a.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
+                                  a.status === 'submitted' ? 'bg-amber-500/20 text-amber-400' :
+                                  a.status === 'overdue' ? 'bg-rose-500/20 text-rose-400' : 'bg-gray-500/20 text-gray-400'
+                                }`}>
+                                  {a.status}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Floating Task Claim Button */}
+                      {isFloating && !myAssignment && (
                         <button
                           onClick={() => handleClaimTask(task.id)}
                           disabled={claimingTaskId === task.id || isFullyClaimed}
@@ -762,12 +941,13 @@ export default function TasksPage() {
                           ) : isFullyClaimed ? (
                             "Claim Limit Reached"
                           ) : (
-                            <><Hand className="w-3.5 h-3.5" /> Claim Task ({claimedCount}/{maxAllowed})</>
+                            <><Hand className="w-3.5 h-3.5" /> Claim Task ({assignments.length}/{maxAllowed})</>
                           )}
                         </button>
                       )}
 
-                      {!isFloating && task.assigned_to === profile?.id && task.status === 'pending' && (
+                      {/* Submit Deliverable Button */}
+                      {myAssignment && myAssignment.status === 'pending' && (
                         <button
                           onClick={() => setSelectedTask(task)}
                           className="w-full py-2.5 neo-btn-green rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 mt-2 cursor-pointer"
@@ -776,10 +956,26 @@ export default function TasksPage() {
                         </button>
                       )}
 
+                      {hasMySubmitted && (
+                        <div className="w-full py-2 neo-pressed rounded-xl text-[10px] font-bold text-amber-500 text-center uppercase tracking-wider">
+                          Submitted — Pending Review
+                        </div>
+                      )}
+
+                      {hasMyCompleted && (
+                        <div className="w-full py-2 neo-pressed rounded-xl text-[10px] font-bold text-emerald-500 text-center uppercase tracking-wider flex items-center justify-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Completed & Points Awarded
+                        </div>
+                      )}
+
+                      {/* Lead Controls */}
                       {isLead && (
                         <div className="flex items-center gap-2 pt-2">
                           <button
-                            onClick={() => { setReassignTask(task); setNewAssigneeId(task.assigned_to || "floating"); }}
+                            onClick={() => { 
+                              setReassignTask(task); 
+                              setNewAssigneeIds(assignments.map((a: any) => a.user_id)); 
+                            }}
                             className="w-1/2 py-2.5 neo-btn rounded-xl text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center justify-center gap-1 hover:scale-105 transition-all cursor-pointer"
                           >
                             <UserPlus className="w-3 h-3" /> Re-assign
@@ -816,7 +1012,7 @@ export default function TasksPage() {
               <p className="text-xs opacity-50 text-center py-8">No submissions in queue.</p>
             ) : (
               submissions.map((sub) => {
-                const canReview = isLead && canReviewSubmission(profile.role, sub.member?.role);
+                const canReview = isLead && canReviewSubmission(profile?.role, sub.member?.role);
                 return (
                   <div key={sub.id} className="neo-pressed rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border border-white/5">
                     <div className="space-y-1">
@@ -883,30 +1079,83 @@ export default function TasksPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {completedTasks.map((task) => (
-                <div key={task.id} className="neo-flat rounded-2xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden border border-emerald-500/20 bg-emerald-500/5">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-emerald-500/10 text-emerald-500 border-emerald-500/20 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Completed
-                      </span>
-                      <span className="text-xs font-mono font-extrabold text-emerald-500">
-                        +{task.points} PTS
-                      </span>
+              {completedTasks.map((task) => {
+                const assignments = task.assignments || [];
+                const completedMembers = assignments.filter((a: any) => a.status === "completed");
+                const pendingMembers = assignments.filter((a: any) => a.status === "pending" || a.status === "submitted");
+                const overdueMembers = assignments.filter((a: any) => a.status === "overdue");
+
+                return (
+                  <div key={task.id} className="neo-flat rounded-2xl p-6 flex flex-col justify-between space-y-4 relative overflow-hidden border border-emerald-500/20 bg-emerald-500/5">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md border bg-emerald-500/10 text-emerald-500 border-emerald-500/20 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Group Task Overview
+                        </span>
+                        <span className="text-xs font-mono font-extrabold text-emerald-500">
+                          +{task.points} PTS
+                        </span>
+                      </div>
+
+                      <h3 className="text-sm font-bold pt-1">{task.title}</h3>
+                      <p className="text-xs opacity-70 leading-relaxed line-clamp-3">{task.description}</p>
                     </div>
 
-                    <h3 className="text-sm font-bold pt-1">{task.title}</h3>
-                    <p className="text-xs opacity-70 leading-relaxed line-clamp-3">{task.description}</p>
-                  </div>
+                    <div className="space-y-3 pt-3 border-t border-[var(--text-muted)]/10 text-[10px]">
+                      <div>
+                        <p className="font-extrabold uppercase text-emerald-500 flex items-center gap-1 mb-1">
+                          <CheckCircle2 className="w-3 h-3" /> Completed ({completedMembers.length}):
+                        </p>
+                        {completedMembers.length === 0 ? (
+                          <p className="opacity-40 italic pl-2">None yet</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {completedMembers.map((m: any) => (
+                              <span key={m.id} className="px-2 py-0.5 rounded neo-pressed text-emerald-400 font-bold">
+                                {m.user?.full_name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
 
-                  <div className="space-y-1.5 pt-3 border-t border-[var(--text-muted)]/10 text-[10px] font-bold">
-                    <div className="flex items-center justify-between">
-                      <span className="opacity-50">Completed By:</span>
-                      <span className="text-emerald-500">{task.assigned_member?.full_name || "Team Member"}</span>
+                      <div>
+                        <p className="font-extrabold uppercase text-amber-500 flex items-center gap-1 mb-1">
+                          <AlertCircle className="w-3 h-3" /> Yet to Complete ({pendingMembers.length}):
+                        </p>
+                        {pendingMembers.length === 0 ? (
+                          <p className="opacity-40 italic pl-2">None</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {pendingMembers.map((m: any) => (
+                              <span key={m.id} className="px-2 py-0.5 rounded neo-pressed text-amber-400 font-bold">
+                                {m.user?.full_name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <p className="font-extrabold uppercase text-rose-500 flex items-center gap-1 mb-1">
+                          <XCircle className="w-3 h-3" /> Not Completed / Overdue ({overdueMembers.length}):
+                        </p>
+                        {overdueMembers.length === 0 ? (
+                          <p className="opacity-40 italic pl-2">None</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {overdueMembers.map((m: any) => (
+                              <span key={m.id} className="px-2 py-0.5 rounded neo-pressed text-rose-400 font-bold">
+                                {m.user?.full_name} (-5 PTS)
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -974,7 +1223,7 @@ export default function TasksPage() {
           <input
             type="text"
             required
-            placeholder="Task Title (e.g. Design Recruitment Posters, API Route Fix)"
+            placeholder="Task Title (e.g. Design Recruitment Posters, Reel Shoot)"
             value={taskTitle}
             onChange={(e) => setTaskTitle(e.target.value)}
             className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
@@ -1004,7 +1253,10 @@ export default function TasksPage() {
                     key={m.id}
                     className="flex items-center justify-between p-2 rounded-lg hover:bg-emerald-500/10 cursor-pointer text-xs font-medium transition-colors"
                   >
-                    <span>{m.full_name} <span className="opacity-50 text-[10px]">({m.domain})</span></span>
+                    <span>
+                      {m.full_name} {m.id === profile?.id && <span className="text-[9px] text-amber-500 font-bold">(You)</span>} 
+                      <span className="opacity-50 text-[10px]"> ({m.domain})</span>
+                    </span>
                     <input
                       type="checkbox"
                       checked={selectedAssignees.includes(m.id)}
@@ -1050,7 +1302,7 @@ export default function TasksPage() {
             </div>
 
             <div>
-              <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Deadline</label>
+              <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Deadline Date & Time</label>
               <input
                 type="datetime-local"
                 required
@@ -1091,7 +1343,7 @@ export default function TasksPage() {
           </div>
 
           <button type="submit" disabled={creatingTask} className="w-full py-3.5 neo-btn-green rounded-xl text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 cursor-pointer">
-            {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckSquare className="w-4 h-4" /> {taskType === "floating" ? `Publish Floating Task (${maxClaims} Claims)` : `Assign Task to ${selectedAssignees.length} Member(s)`}</>}
+            {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckSquare className="w-4 h-4" /> {taskType === "floating" ? `Publish Floating Task (${maxClaims} Claims)` : `Assign Single Task Card to ${selectedAssignees.length} Member(s)`}</>}
           </button>
         </form>
       )}
@@ -1244,7 +1496,7 @@ export default function TasksPage() {
               <label className="text-[9px] font-extrabold uppercase opacity-60">1. Filter Domain</label>
               <select
                 value={reassignDomainFilter}
-                onChange={(e) => { setReassignDomainFilter(e.target.value); setNewAssigneeId(""); }}
+                onChange={(e) => { setReassignDomainFilter(e.target.value); setNewAssigneeIds([]); }}
                 className="w-full px-4 py-2 neo-pressed rounded-xl text-xs bg-transparent font-bold cursor-pointer"
               >
                 <option value="all" className="bg-[var(--bg-surface)]">All Domains</option>
@@ -1254,21 +1506,30 @@ export default function TasksPage() {
                 <option value="executive" className="bg-[var(--bg-surface)]">Executive</option>
               </select>
 
-              <label className="text-[9px] font-extrabold uppercase opacity-60 pt-1 block">2. Select Member or Make Floating</label>
-              <select
-                required
-                value={newAssigneeId}
-                onChange={(e) => setNewAssigneeId(e.target.value)}
-                className="w-full px-4 py-3 neo-pressed rounded-xl text-xs bg-transparent focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
-              >
-                <option value="" className="bg-[var(--bg-surface)]">-- Select New Member --</option>
-                <option value="floating" className="bg-[var(--bg-surface)] font-bold text-teal-400">🌐 Make Floating Task (Unassigned)</option>
-                {filterMembersByDomain(reassignDomainFilter).map(m => (
-                  <option key={m.id} value={m.id} className="bg-[var(--bg-surface)]">
-                    {m.full_name} ({m.domain})
-                  </option>
+              <label className="text-[9px] font-extrabold uppercase opacity-60 pt-1 block">2. Select New Assignee List</label>
+              <div className="max-h-40 overflow-y-auto neo-pressed rounded-xl p-2 space-y-1 custom-scrollbar">
+                {filterMembersByDomain(reassignDomainFilter).map((m) => (
+                  <label
+                    key={m.id}
+                    className="flex items-center justify-between p-2 rounded-lg hover:bg-amber-500/10 cursor-pointer text-xs font-medium transition-colors"
+                  >
+                    <span>
+                      {m.full_name} {m.id === profile?.id && <span className="text-[9px] text-amber-500 font-bold">(You)</span>} 
+                      <span className="opacity-50 text-[10px]"> ({m.domain})</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={newAssigneeIds.includes(m.id)}
+                      onChange={() => {
+                        setNewAssigneeIds(prev => 
+                          prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]
+                        );
+                      }}
+                      className="accent-amber-500 w-4 h-4 cursor-pointer"
+                    />
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
 
             <div className="flex gap-2 pt-2">
@@ -1281,7 +1542,7 @@ export default function TasksPage() {
               </button>
               <button
                 type="submit"
-                disabled={isReassigning}
+                disabled={isReassigning || newAssigneeIds.length === 0}
                 className="w-1/2 py-3 neo-btn rounded-xl text-xs font-bold text-amber-500 flex justify-center items-center gap-2 border border-amber-500/30 cursor-pointer"
               >
                 {isReassigning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm"}
@@ -1404,6 +1665,7 @@ export default function TasksPage() {
             <div className="neo-pressed rounded-2xl p-4 space-y-1">
               <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Task to Delete:</p>
               <p className="text-xs font-bold truncate text-[var(--text-main)]">"{deleteModal.title}"</p>
+              <p className="text-[9px] text-rose-400 pt-1 font-semibold">⚠️ Deleting this task will automatically revoke any points awarded to members or assigners for it.</p>
             </div>
 
             <div className="flex gap-2.5 pt-1">
