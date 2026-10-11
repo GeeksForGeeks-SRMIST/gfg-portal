@@ -27,7 +27,8 @@ import {
   Moon,
   Stars,
   Layers,
-  Crown
+  Crown,
+  User
 } from "lucide-react";
 import Link from "next/link";
 
@@ -39,6 +40,58 @@ interface TimePhase {
   nameColorClass: string;
   badgeContainerStyle: string;
   buttonStyle: string;
+}
+
+// Executive Live Countdown Timer Component for Dashboard Tasks
+function CountdownTimer({ deadline }: { deadline: string }) {
+  const [timeLeft, setTimeLeft] = useState<{
+    days: number;
+    hours: number;
+    minutes: number;
+    seconds: number;
+    isOverdue: boolean;
+  }>({ days: 0, hours: 0, minutes: 0, seconds: 0, isOverdue: false });
+
+  useEffect(() => {
+    const calculateTime = () => {
+      const target = new Date(deadline).getTime();
+      const now = new Date().getTime();
+      const diff = target - now;
+
+      if (diff <= 0) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, isOverdue: true });
+      } else {
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeLeft({ days, hours, minutes, seconds, isOverdue: false });
+      }
+    };
+
+    calculateTime();
+    const timer = setInterval(calculateTime, 1000);
+    return () => clearInterval(timer);
+  }, [deadline]);
+
+  if (timeLeft.isOverdue) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-500 text-[10px] font-black uppercase tracking-wider">
+        <AlertTriangle className="w-3 h-3 animate-pulse" />
+        <span>Overdue</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 dark:text-amber-400 font-mono text-xs font-black tracking-tight shadow-xs">
+      <Clock className="w-3.5 h-3.5 text-amber-500 animate-pulse shrink-0" />
+      <span>
+        {timeLeft.days > 0 && `${timeLeft.days}d `}
+        {String(timeLeft.hours).padStart(2, "0")}h {String(timeLeft.minutes).padStart(2, "0")}m {String(timeLeft.seconds).padStart(2, "0")}s
+      </span>
+    </span>
+  );
 }
 
 export default function DashboardOverview() {
@@ -68,7 +121,7 @@ export default function DashboardOverview() {
   // Admin Metrics
   const [pendingUsersCount, setPendingUsersCount] = useState(0);
   const [complaintsCount, setComplaintsCount] = useState(0);
-  const [totalApprovedMembers, setTotalApprovedMembers] = useState(0);
+  const [totalApprovedMembers, setTotalApprovedMembers] = useState<number>(0);
 
   // Quick Event Modal State
   const [showAddEventModal, setShowAddEventModal] = useState(false);
@@ -179,6 +232,7 @@ export default function DashboardOverview() {
       .channel("dashboard_realtime_overview")
       .on("postgres_changes", { event: "*", schema: "public", table: "points_ledger" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => fetchDashboardData())
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_assignments" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "task_submissions" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchDashboardData())
       .on("postgres_changes", { event: "*", schema: "public", table: "confessions" }, () => fetchDashboardData())
@@ -198,13 +252,23 @@ export default function DashboardOverview() {
     const { data: profileData } = await supabase.from("profiles").select("*").eq("id", user.id).single();
     setProfile(profileData);
 
-    const { data: tasksData } = await supabase
-      .from("tasks")
-      .select("*")
-      .eq("assigned_to", user.id)
-      .eq("status", "pending")
-      .order("deadline", { ascending: true });
-    setMyTasks(tasksData || []);
+    // Fetch tasks assigned to/claimed by user via task_assignments joined with tasks
+    const { data: assignData } = await supabase
+      .from("task_assignments")
+      .select(`
+        id,
+        status,
+        task:tasks(*)
+      `)
+      .eq("user_id", user.id)
+      .eq("status", "pending");
+
+    const fetchedMyTasks = (assignData || [])
+      .map((item: any) => item.task)
+      .filter((t: any) => t && t.status !== "completed")
+      .sort((a: any, b: any) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+
+    setMyTasks(fetchedMyTasks);
 
     const { data: noticesData } = await supabase
       .from("notices")
@@ -232,10 +296,14 @@ export default function DashboardOverview() {
       pointsMap[item.profile_id] = (pointsMap[item.profile_id] || 0) + item.points_awarded;
     });
 
-    const rankedList = (profilesWithPoints || []).map((p) => ({
-      ...p,
-      points: pointsMap[p.id] || 0
-    })).sort((a, b) => b.points - a.points);
+    // Filter out president role from leaderboard and sort by points
+    const rankedList = (profilesWithPoints || [])
+      .filter((p) => p.role !== "president")
+      .map((p) => ({
+        ...p,
+        points: pointsMap[p.id] || 0
+      }))
+      .sort((a, b) => b.points - a.points);
 
     setTopLeaderboard(rankedList);
     setMyPoints(pointsMap[user.id] || 0);
@@ -256,7 +324,7 @@ export default function DashboardOverview() {
     setComplaintsCount(compCount || 0);
 
     const { count: approvedCount } = await supabase.from("profiles").select("*", { count: "exact", head: true }).eq("status", "approved");
-    setTotalApprovedMembers(approvedCount || 58);
+    setTotalApprovedMembers(approvedCount || 0);
   }
 
   async function handleQuickAddEvent(e: React.FormEvent) {
@@ -411,7 +479,7 @@ export default function DashboardOverview() {
             <span className="text-[8px] font-extrabold uppercase tracking-widest opacity-50">Enrolled</span>
           </div>
           <div>
-            <p className="text-xl md:text-3xl font-black leading-none">{totalApprovedMembers || 58}</p>
+            <p className="text-xl md:text-3xl font-black leading-none">{totalApprovedMembers}</p>
             <p className="text-[9px] font-bold opacity-50 uppercase tracking-wider mt-1">Core Members</p>
           </div>
         </div>
@@ -447,37 +515,66 @@ export default function DashboardOverview() {
             </Link>
           </div>
 
-          <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 h-[320px] flex flex-col justify-between">
+          {/* REDESIGNED & CLICKABLE: My Active Tasks Container with Prominent Timers */}
+          <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 min-h-[340px] flex flex-col justify-between border border-emerald-500/10">
             <div className="flex items-center justify-between px-1 shrink-0">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-                <CheckSquare className="w-4 h-4" />
-                <h3 className="text-xs font-extrabold uppercase tracking-widest">My Active Tasks</h3>
+                <div className="w-7 h-7 rounded-xl neo-pressed flex items-center justify-center text-emerald-500 shrink-0">
+                  <CheckSquare className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold uppercase tracking-widest">My Active Tasks</h3>
+                  <p className="text-[9px] font-semibold opacity-50">Deliverables awaiting submission</p>
+                </div>
               </div>
-              <Link href="/dashboard/tasks" className="text-[10px] font-bold opacity-60 hover:text-emerald-500 flex items-center gap-1 transition-colors">
-                All Tasks <ChevronRight className="w-3 h-3" />
+
+              <Link href="/dashboard/tasks" className="px-3 py-1.5 neo-btn rounded-xl text-[10px] font-extrabold text-emerald-500 flex items-center gap-1 hover:scale-105 transition-all">
+                Task Hub <ChevronRight className="w-3.5 h-3.5" />
               </Link>
             </div>
 
-            <div className="space-y-2.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
+            <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-1 max-h-[260px]">
               {myTasks.length === 0 ? (
-                <div className="neo-pressed rounded-2xl p-6 text-center opacity-50 flex flex-col items-center justify-center h-full">
-                  <CheckCircle2 className="w-6 h-6 mb-2 text-emerald-500" />
-                  <p className="text-xs font-bold">No pending tasks assigned right now.</p>
+                <div className="neo-pressed rounded-2xl p-8 text-center opacity-50 flex flex-col items-center justify-center h-full">
+                  <CheckCircle2 className="w-8 h-8 mb-2 text-emerald-500" />
+                  <p className="text-xs font-bold">No active tasks assigned right now.</p>
+                  <p className="text-[10px] opacity-70 mt-0.5">Check Floating Tasks on the Tasks tab to earn extra points!</p>
                 </div>
               ) : (
                 myTasks.map((task) => (
-                  <div key={task.id} className="neo-pressed rounded-2xl p-3.5 flex items-center justify-between gap-3 border border-white/5">
-                    <div className="space-y-0.5 overflow-hidden">
-                      <h4 className="text-xs font-bold truncate">{task.title}</h4>
-                      <p className="text-[10px] opacity-60 line-clamp-1">{task.description}</p>
+                  <Link
+                    key={task.id}
+                    href="/dashboard/tasks"
+                    className="group block neo-pressed rounded-2xl p-4 hover:border-emerald-500/40 hover:shadow-lg transition-all border border-white/5 space-y-3 cursor-pointer relative overflow-hidden"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1 overflow-hidden min-w-0 pr-2">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs md:text-sm font-extrabold truncate group-hover:text-emerald-500 transition-colors">
+                            {task.title}
+                          </h4>
+                        </div>
+                        <p className="text-[11px] opacity-60 line-clamp-1 leading-relaxed">
+                          {task.description}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-black font-mono text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl shadow-xs">
+                          +{task.points} PTS
+                        </span>
+                        <ArrowUpRight className="w-4 h-4 text-[var(--text-muted)] group-hover:text-emerald-500 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+                      </div>
                     </div>
-                    <div className="text-right shrink-0 space-y-1">
-                      <span className="text-[9px] font-black uppercase tracking-widest text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> {new Date(task.deadline).toLocaleDateString()}
-                      </span>
-                      <p className="text-[10px] font-bold text-emerald-500">+{task.points} PTS</p>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5 text-xs font-medium">
+                      <div className="flex items-center gap-1.5 opacity-60 text-[10px] font-bold">
+                        <CalendarDays className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span>Deadline: {new Date(task.deadline).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                      </div>
+                      <CountdownTimer deadline={task.deadline} />
                     </div>
-                  </div>
+                  </Link>
                 ))
               )}
             </div>
@@ -485,6 +582,7 @@ export default function DashboardOverview() {
 
         </div>
 
+        {/* Top Performers Leaderboard with Member Photos & President Hidden */}
         <div className="lg:col-span-4 flex flex-col justify-between">
           <div className="neo-flat rounded-[2rem] p-5 md:p-6 space-y-4 h-[432px] flex flex-col justify-between">
             <div className="flex items-center justify-between px-1 shrink-0">
@@ -504,18 +602,29 @@ export default function DashboardOverview() {
                 topLeaderboard.map((member, rank) => (
                   <div key={member.id} className="neo-pressed rounded-2xl p-3 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5 overflow-hidden">
-                      <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black ${
+                      <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black shrink-0 ${
                         rank === 0 ? "bg-amber-500 text-black" :
                         rank === 1 ? "bg-slate-300 text-black" :
                         rank === 2 ? "bg-amber-700 text-white" : "neo-btn opacity-60"
                       }`}>
                         #{rank + 1}
                       </span>
+
+                      {/* Member Photo Avatar */}
+                      <div className="w-7 h-7 rounded-full neo-pressed overflow-hidden flex items-center justify-center shrink-0 border border-emerald-500/30">
+                        {member.avatar_path ? (
+                          <img src={member.avatar_path} alt={member.full_name} className="w-full h-full object-cover" />
+                        ) : (
+                          <User className="w-3.5 h-3.5 opacity-40" />
+                        )}
+                      </div>
+
                       <div className="overflow-hidden">
                         <p className="text-xs font-bold truncate">{member.full_name}</p>
                         <p className="text-[9px] opacity-50 uppercase tracking-widest truncate">{member.domain}</p>
                       </div>
                     </div>
+                    
                     <span className="text-xs font-mono font-extrabold text-emerald-500 shrink-0">
                       {member.points} PTS
                     </span>
