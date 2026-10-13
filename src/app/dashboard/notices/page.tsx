@@ -5,15 +5,22 @@ import { createClient } from "@/lib/supabase/client";
 import { sendNotification } from "@/app/actions/notify";
 import { 
   Bell, Plus, Loader2, Trash2, Send, AlertTriangle, CheckCircle2, 
-  Bold, Italic, List, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock, Users, ShieldCheck, Video
+  Bold, Italic, List, Link2, ExternalLink, Sparkles, LayoutList, PenSquare, Lock, Users, ShieldCheck, Video, Layers
 } from "lucide-react";
 
+// 1. Target Domain Options
+const DOMAIN_OPTIONS = [
+  { id: "all", label: "ALL DOMAINS" },
+  { id: "technical", label: "TECHNICAL" },
+  { id: "events", label: "EVENTS" },
+  { id: "creatives", label: "CREATIVES" },
+];
+
+// 2. Target Position Options
 const ROLE_OPTIONS = [
-  { id: "all", label: "Full Team (Everyone)" },
-  { id: "executive", label: "Executives (Presidents, Secs & Jt. Secs)" },
-  { id: "domain_director", label: "Domain Directors" },
-  { id: "associate_lead", label: "Associate Leads" },
-  { id: "member", label: "Core Members" },
+  { id: "all", label: "FULL TEAM" },
+  { id: "domain_director", label: "DIRECTORS" },
+  { id: "dd_and_associate", label: "DIRECTORS AND ASSOCIATES" },
 ];
 
 export default function NoticesPage() {
@@ -28,6 +35,7 @@ export default function NoticesPage() {
   const [content, setContent] = useState("");
   const [meetingLink, setMeetingLink] = useState("");
   const [isImportant, setIsImportant] = useState(false);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>(["all"]);
   const [selectedRoles, setSelectedRoles] = useState<string[]>(["all"]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -51,7 +59,7 @@ export default function NoticesPage() {
     fetchData();
 
     const channel = supabase
-      .channel("notices_realtime_board_v8")
+      .channel("notices_realtime_board_v12")
       .on("postgres_changes", { event: "*", schema: "public", table: "notices" }, () => {
         fetchData();
       })
@@ -66,28 +74,57 @@ export default function NoticesPage() {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     let userRole = "member";
+    let userDomain = "general";
+    let userId = "";
 
     if (user) {
-      const { data: profileData } = await supabase.from("profiles").select("id, role").eq("id", user.id).single();
+      userId = user.id;
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("id, role, domain")
+        .eq("id", user.id)
+        .single();
+      
       setProfile(profileData);
       userRole = profileData?.role?.toLowerCase() || "member";
+      userDomain = profileData?.domain?.toLowerCase() || "general";
     }
 
     const { data: noticesData } = await supabase
       .from("notices")
-      .select("*, author:profiles(full_name, role)")
+      .select("*, author:profiles(full_name, role, domain)")
       .order("created_at", { ascending: false });
-    
-    const filtered = (noticesData || []).filter((n) => {
-      const targets: string[] = n.target_roles || ["all"];
-      if (targets.includes("all")) return true;
 
-      const isExecUser = ['president', 'secretary', 'joint_secretary'].includes(userRole);
-      if (isExecUser) {
-        return targets.includes("executive") || targets.includes(userRole);
+    const filtered = (noticesData || []).filter((n) => {
+      // 1. Author always sees their published notices
+      if (userId && n.author_id === userId) return true;
+
+      // 2. Executives & Domain Directors automatically see all notices
+      const isExecOrDD = ['president', 'secretary', 'joint_secretary', 'domain_director'].includes(userRole);
+      if (isExecOrDD) return true;
+
+      const targetRoles: string[] = n.target_roles || ["all"];
+      const targetDomains: string[] = n.target_domains || ["all"];
+
+      // 3. Position Check
+      let matchesRole = false;
+      if (targetRoles.includes("all")) {
+        matchesRole = true;
+      } else if (targetRoles.includes("dd_and_associate") && userRole === "associate_lead") {
+        matchesRole = true;
+      } else if (targetRoles.includes("domain_director") && userRole === "domain_director") {
+        matchesRole = true;
       }
 
-      return targets.includes(userRole);
+      // 4. Domain Check
+      let matchesDomain = false;
+      if (targetDomains.includes("all") || targetDomains.length === 0) {
+        matchesDomain = true;
+      } else {
+        matchesDomain = targetDomains.some(d => d.toLowerCase() === userDomain);
+      }
+
+      return matchesRole && matchesDomain;
     });
 
     setNotices(filtered);
@@ -107,6 +144,26 @@ export default function NoticesPage() {
       member: "Core Member"
     };
     return roleMap[rawRole.toLowerCase()] || rawRole.replace("_", " ").toUpperCase();
+  }
+
+  function toggleDomainSelection(domainId: string) {
+    if (domainId === "all") {
+      setSelectedDomains(["all"]);
+      return;
+    }
+
+    let updated = selectedDomains.filter(d => d !== "all");
+    if (updated.includes(domainId)) {
+      updated = updated.filter(d => d !== domainId);
+    } else {
+      updated.push(domainId);
+    }
+
+    if (updated.length === 0) {
+      updated = ["all"];
+    }
+
+    setSelectedDomains(updated);
   }
 
   function toggleRoleSelection(roleId: string) {
@@ -199,11 +256,14 @@ export default function NoticesPage() {
       ? (meetingLink.startsWith("http") ? meetingLink.trim() : `https://${meetingLink.trim()}`)
       : null;
 
+    const formattedTitle = title.trim().toUpperCase();
+
     const { error: insertErr } = await supabase.from("notices").insert({
-      title,
+      title: formattedTitle,
       content,
       meeting_link: formattedMeetingUrl,
       is_important: isImportant,
+      target_domains: selectedDomains,
       target_roles: selectedRoles,
       author_id: profile?.id
     });
@@ -218,7 +278,7 @@ export default function NoticesPage() {
       return;
     }
 
-    const broadcastTitle = `${isImportant ? '🚨' : '📢'} ${title}`;
+    const broadcastTitle = `${isImportant ? '🚨' : '📢'} ${formattedTitle}`;
     const broadcastMessage = content.substring(0, 100) + "...";
 
     try {
@@ -240,6 +300,7 @@ export default function NoticesPage() {
     setContent("");
     setMeetingLink("");
     setIsImportant(false);
+    setSelectedDomains(["all"]);
     setSelectedRoles(["all"]);
     setIsPublishing(false);
     
@@ -303,7 +364,7 @@ export default function NoticesPage() {
           </div>
           <div>
             <h2 className="text-xl font-black text-gradient">Announcements & Board</h2>
-            <p className="text-xs font-semibold opacity-60">Official announcements, role-targeted notices, and meeting schedules.</p>
+            <p className="text-xs font-semibold opacity-60">Official announcements, domain & position targeted notices, and meeting schedules.</p>
           </div>
         </div>
 
@@ -341,14 +402,16 @@ export default function NoticesPage() {
             <div className="flex justify-center p-12"><Loader2 className="w-6 h-6 animate-spin opacity-50"/></div>
           ) : notices.length === 0 ? (
             <div className="neo-flat rounded-3xl p-12 text-center opacity-50 text-xs font-bold">
-              No announcements published for your position level yet.
+              No announcements published for your position or domain level yet.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {notices.map((notice) => {
+                const domains: string[] = notice.target_domains || ["all"];
                 const roles: string[] = notice.target_roles || ["all"];
                 const authorName = notice.author?.full_name || "Executive Lead";
                 const authorPosition = formatRoleTitle(notice.author?.role);
+                const authorDomain = notice.author?.domain ? notice.author.domain.toUpperCase() : "EXECUTIVE";
 
                 return (
                   <div
@@ -360,7 +423,7 @@ export default function NoticesPage() {
                     <div className="space-y-3 pt-1">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1">
-                          <h3 className={`text-base font-black leading-snug tracking-tight ${
+                          <h3 className={`text-base font-black leading-snug tracking-tight uppercase ${
                             notice.is_important ? 'text-rose-500' : 'text-emerald-500'
                           }`}>
                             {notice.title}
@@ -377,10 +440,25 @@ export default function NoticesPage() {
                         )}
                       </div>
 
-                      {/* Position Target Badges */}
+                      {/* Domain & Position Target Badges */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
                         <span className="text-[9px] font-bold opacity-50 uppercase tracking-widest flex items-center gap-1 mr-1">
-                          <Users className="w-3 h-3" /> Target:
+                          <Layers className="w-3 h-3" /> Domain:
+                        </span>
+                        {domains.includes("all") ? (
+                          <span className="px-2 py-0.5 neo-pressed rounded-lg text-[9px] font-extrabold text-teal-400 uppercase tracking-wider">
+                            All Domains
+                          </span>
+                        ) : (
+                          domains.map((d) => (
+                            <span key={d} className="px-2 py-0.5 neo-pressed rounded-lg text-[9px] font-extrabold text-teal-400 uppercase tracking-wider">
+                              {d}
+                            </span>
+                          ))
+                        )}
+
+                        <span className="text-[9px] font-bold opacity-50 uppercase tracking-widest flex items-center gap-1 ml-2 mr-1">
+                          <Users className="w-3 h-3" /> Position:
                         </span>
                         {roles.includes("all") ? (
                           <span className="px-2 py-0.5 neo-pressed rounded-lg text-[9px] font-extrabold text-emerald-500 uppercase tracking-wider">
@@ -389,7 +467,7 @@ export default function NoticesPage() {
                         ) : (
                           roles.map((r) => (
                             <span key={r} className="px-2 py-0.5 neo-pressed rounded-lg text-[9px] font-extrabold text-amber-500 uppercase tracking-wider">
-                              {r === "executive" ? "Executives" : r === "member" ? "Core Members" : r.replace("_", " ")}
+                              {r === "domain_director" ? "Directors" : r === "dd_and_associate" ? "Directors & Associates" : r.replace("_", " ")}
                             </span>
                           ))
                         )}
@@ -422,7 +500,7 @@ export default function NoticesPage() {
                       <div className="flex items-center gap-1.5 overflow-hidden">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0"/>
                         <span className="font-extrabold text-emerald-500 uppercase tracking-wider truncate">
-                          {authorName} <span className="opacity-60 text-[var(--text-main)] font-semibold">({authorPosition})</span>
+                          {authorName} <span className="opacity-60 text-[var(--text-main)] font-semibold">({authorPosition} • {authorDomain})</span>
                         </span>
                       </div>
 
@@ -469,27 +547,55 @@ export default function NoticesPage() {
               <div className="flex items-center justify-between border-b border-white/10 pb-3">
                 <div>
                   <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Publish Targeted Notice</h3>
-                  <p className="text-[10px] opacity-60 mt-0.5">Select position targets, add details, and dispatch broadcast</p>
+                  <p className="text-[10px] opacity-60 mt-0.5">Select target domain and position, add details, and dispatch broadcast</p>
                 </div>
                 <Sparkles className="w-5 h-5 text-emerald-500 opacity-60"/>
               </div>
               
               <div className="space-y-1">
-                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Heading / Subject *</label>
+                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Heading / Subject (UPPERCASE) *</label>
                 <input
                   type="text"
-                  placeholder="e.g. Domain Directors Sync & Task Review"
+                  placeholder="e.g. TECHNICAL DOMAIN SYNC & TASK REVIEW"
                   required
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-4 py-3 neo-pressed rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-transparent font-extrabold"
+                  onChange={(e) => setTitle(e.target.value.toUpperCase())}
+                  className="w-full px-4 py-3 neo-pressed rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-transparent font-extrabold uppercase"
                 />
               </div>
 
-              {/* Target Position Checkboxes */}
+              {/* 1. Target Domain Selection */}
               <div className="space-y-2">
-                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">Select Target Positions *</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">1. Select Target Domain *</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {DOMAIN_OPTIONS.map((opt) => {
+                    const isChecked = selectedDomains.includes(opt.id);
+                    return (
+                      <label
+                        key={opt.id}
+                        onClick={() => toggleDomainSelection(opt.id)}
+                        className={`p-3 rounded-2xl border text-xs font-extrabold flex items-center gap-2 cursor-pointer transition-all ${
+                          isChecked 
+                            ? "neo-pressed text-teal-400 border-teal-500/40 bg-teal-500/10" 
+                            : "neo-flat opacity-60 hover:opacity-100 border-transparent"
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-md flex items-center justify-center border transition-colors shrink-0 ${
+                          isChecked ? "bg-teal-400 border-teal-400 text-black" : "border-white/20"
+                        }`}>
+                          {isChecked && <CheckCircle2 className="w-3 h-3 text-black" />}
+                        </div>
+                        <span className="text-[10px] uppercase tracking-wider truncate">{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Target Position Selection */}
+              <div className="space-y-2 pt-1">
+                <label className="text-[9px] font-extrabold uppercase opacity-60 px-1">2. Select Target Position *</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   {ROLE_OPTIONS.map((opt) => {
                     const isChecked = selectedRoles.includes(opt.id);
                     return (
@@ -507,7 +613,9 @@ export default function NoticesPage() {
                         }`}>
                           {isChecked && <CheckCircle2 className="w-3 h-3 text-black" />}
                         </div>
-                        <span className="text-[10px] uppercase tracking-wider truncate">{opt.label}</span>
+                        <span className="text-[10px] uppercase tracking-wider leading-tight whitespace-normal font-extrabold">
+                          {opt.label}
+                        </span>
                       </label>
                     );
                   })}
@@ -515,7 +623,7 @@ export default function NoticesPage() {
               </div>
 
               {/* Optional Meeting Link Input */}
-              <div className="space-y-1">
+              <div className="space-y-1 pt-1">
                 <label className="text-[9px] font-extrabold uppercase opacity-60 px-1 flex items-center gap-1">
                   <Video className="w-3 h-3 text-emerald-500" /> Meeting Link (Optional)
                 </label>
@@ -528,7 +636,7 @@ export default function NoticesPage() {
                 />
               </div>
 
-              {/* Description & Link Formatting Toolbar */}
+              {/* Description & Formatting Toolbar */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between px-1">
                   <label className="text-[9px] font-extrabold uppercase opacity-60">Description & Notes *</label>

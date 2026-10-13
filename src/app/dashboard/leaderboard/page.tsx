@@ -12,8 +12,15 @@ import {
   X, 
   CheckCircle2, 
   Sparkles, 
-  TrendingDown 
+  TrendingDown,
+  Hash
 } from "lucide-react";
+
+// Helper to display short clean Task ID
+const formatTaskId = (id: string) => {
+  if (!id) return null;
+  return `#${id.slice(0, 8).toUpperCase()}`;
+};
 
 export default function LeaderboardPage() {
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
@@ -374,11 +381,12 @@ export default function LeaderboardPage() {
                 memberLedger.map((item) => {
                   const isNegative = item.points_awarded < 0;
                   const isBonus = item.reason?.includes("Executive Bonus");
+                  const taskIdFormatted = formatTaskId(item.task_id);
                   
                   return (
                     <div key={item.id} className="neo-pressed p-3.5 rounded-2xl flex items-center justify-between gap-3">
                       <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           {isNegative ? (
                             <TrendingDown className="w-3.5 h-3.5 text-rose-500 shrink-0" />
                           ) : isBonus ? (
@@ -386,6 +394,13 @@ export default function LeaderboardPage() {
                           ) : (
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                           )}
+
+                          {taskIdFormatted && (
+                            <span className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/5 text-amber-400 border border-amber-500/20 inline-flex items-center gap-0.5 shrink-0">
+                              <Hash className="w-2 h-2" /> {taskIdFormatted}
+                            </span>
+                          )}
+
                           <p className="text-xs font-bold leading-tight">{item.reason}</p>
                         </div>
                         <p className="text-[9px] opacity-40 font-mono pl-5">{new Date(item.created_at).toLocaleString()}</p>
